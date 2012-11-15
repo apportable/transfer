@@ -1,0 +1,270 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 46;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		5BD433B3163BD25D006E8FCE /* libmtp.c in Sources */ = {isa = PBXBuildFile; fileRef = 5B2AF69F163BD0FB00140997 /* libmtp.c */; };
+		5BD433B6163BD25D006E8FCE /* libusb1-glue.c in Sources */ = {isa = PBXBuildFile; fileRef = 5B2AF6A6163BD0FB00140997 /* libusb1-glue.c */; };
+		5BD433B8163BD25D006E8FCE /* playlist-spl.c in Sources */ = {isa = PBXBuildFile; fileRef = 5B2AF6AC163BD0FB00140997 /* playlist-spl.c */; };
+		5BD433B9163BD25D006E8FCE /* ptp-pack.c in Sources */ = {isa = PBXBuildFile; fileRef = 5B2AF6AE163BD0FB00140997 /* ptp-pack.c */; };
+		5BD433BA163BD25D006E8FCE /* ptp.c in Sources */ = {isa = PBXBuildFile; fileRef = 5B2AF6AF163BD0FB00140997 /* ptp.c */; };
+		5BD433BB163BD25D006E8FCE /* unicode.c in Sources */ = {isa = PBXBuildFile; fileRef = 5B2AF6B2163BD0FB00140997 /* unicode.c */; };
+		5BD433BC163BD25D006E8FCE /* util.c in Sources */ = {isa = PBXBuildFile; fileRef = 5B2AF6B4163BD0FB00140997 /* util.c */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		5B2AF694163BD0D400140997 /* libmtp.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libmtp.a; sourceTree = BUILT_PRODUCTS_DIR; };
+		5B2AF69C163BD0FB00140997 /* _stdint.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = _stdint.h; sourceTree = "<group>"; };
+		5B2AF69D163BD0FB00140997 /* device-flags.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "device-flags.h"; sourceTree = "<group>"; };
+		5B2AF69E163BD0FB00140997 /* gphoto2-endian.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "gphoto2-endian.h"; sourceTree = "<group>"; };
+		5B2AF69F163BD0FB00140997 /* libmtp.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = libmtp.c; sourceTree = "<group>"; };
+		5B2AF6A0163BD0FB00140997 /* libmtp.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = libmtp.h; sourceTree = "<group>"; };
+		5B2AF6A3163BD0FB00140997 /* libopenusb1-glue.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "libopenusb1-glue.c"; sourceTree = "<group>"; };
+		5B2AF6A4163BD0FB00140997 /* libusb-glue.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "libusb-glue.c"; sourceTree = "<group>"; };
+		5B2AF6A5163BD0FB00140997 /* libusb-glue.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "libusb-glue.h"; sourceTree = "<group>"; };
+		5B2AF6A6163BD0FB00140997 /* libusb1-glue.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "libusb1-glue.c"; sourceTree = "<group>"; };
+		5B2AF6A9163BD0FB00140997 /* mtpz.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = mtpz.c; sourceTree = "<group>"; };
+		5B2AF6AA163BD0FB00140997 /* mtpz.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = mtpz.h; sourceTree = "<group>"; };
+		5B2AF6AB163BD0FB00140997 /* music-players.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "music-players.h"; sourceTree = "<group>"; };
+		5B2AF6AC163BD0FB00140997 /* playlist-spl.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "playlist-spl.c"; sourceTree = "<group>"; };
+		5B2AF6AD163BD0FB00140997 /* playlist-spl.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "playlist-spl.h"; sourceTree = "<group>"; };
+		5B2AF6AE163BD0FB00140997 /* ptp-pack.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "ptp-pack.c"; sourceTree = "<group>"; };
+		5B2AF6AF163BD0FB00140997 /* ptp.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = ptp.c; sourceTree = "<group>"; };
+		5B2AF6B0163BD0FB00140997 /* ptp.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ptp.h; sourceTree = "<group>"; };
+		5B2AF6B2163BD0FB00140997 /* unicode.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = unicode.c; sourceTree = "<group>"; };
+		5B2AF6B3163BD0FB00140997 /* unicode.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = unicode.h; sourceTree = "<group>"; };
+		5B2AF6B4163BD0FB00140997 /* util.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = util.c; sourceTree = "<group>"; };
+		5B2AF6B5163BD0FB00140997 /* util.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = util.h; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		5B2AF691163BD0D400140997 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		5B2AF689163BD0D400140997 = {
+			isa = PBXGroup;
+			children = (
+				5B2AF69B163BD0FB00140997 /* src */,
+				5B2AF695163BD0D400140997 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		5B2AF695163BD0D400140997 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				5B2AF694163BD0D400140997 /* libmtp.a */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		5B2AF69B163BD0FB00140997 /* src */ = {
+			isa = PBXGroup;
+			children = (
+				5B2AF69C163BD0FB00140997 /* _stdint.h */,
+				5B2AF69D163BD0FB00140997 /* device-flags.h */,
+				5B2AF69E163BD0FB00140997 /* gphoto2-endian.h */,
+				5B2AF69F163BD0FB00140997 /* libmtp.c */,
+				5B2AF6A0163BD0FB00140997 /* libmtp.h */,
+				5B2AF6A3163BD0FB00140997 /* libopenusb1-glue.c */,
+				5B2AF6A4163BD0FB00140997 /* libusb-glue.c */,
+				5B2AF6A5163BD0FB00140997 /* libusb-glue.h */,
+				5B2AF6A6163BD0FB00140997 /* libusb1-glue.c */,
+				5B2AF6A9163BD0FB00140997 /* mtpz.c */,
+				5B2AF6AA163BD0FB00140997 /* mtpz.h */,
+				5B2AF6AB163BD0FB00140997 /* music-players.h */,
+				5B2AF6AC163BD0FB00140997 /* playlist-spl.c */,
+				5B2AF6AD163BD0FB00140997 /* playlist-spl.h */,
+				5B2AF6AE163BD0FB00140997 /* ptp-pack.c */,
+				5B2AF6AF163BD0FB00140997 /* ptp.c */,
+				5B2AF6B0163BD0FB00140997 /* ptp.h */,
+				5B2AF6B2163BD0FB00140997 /* unicode.c */,
+				5B2AF6B3163BD0FB00140997 /* unicode.h */,
+				5B2AF6B4163BD0FB00140997 /* util.c */,
+				5B2AF6B5163BD0FB00140997 /* util.h */,
+			);
+			path = src;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXHeadersBuildPhase section */
+		5B2AF692163BD0D400140997 /* Headers */ = {
+			isa = PBXHeadersBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXHeadersBuildPhase section */
+
+/* Begin PBXNativeTarget section */
+		5B2AF693163BD0D400140997 /* mtp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5B2AF698163BD0D400140997 /* Build configuration list for PBXNativeTarget "mtp" */;
+			buildPhases = (
+				5B2AF690163BD0D400140997 /* Sources */,
+				5B2AF691163BD0D400140997 /* Frameworks */,
+				5B2AF692163BD0D400140997 /* Headers */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = mtp;
+			productName = mtp;
+			productReference = 5B2AF694163BD0D400140997 /* libmtp.a */;
+			productType = "com.apple.product-type.library.static";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		5B2AF68B163BD0D400140997 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastUpgradeCheck = 0450;
+				ORGANIZATIONNAME = Apportable;
+			};
+			buildConfigurationList = 5B2AF68E163BD0D400140997 /* Build configuration list for PBXProject "mtp" */;
+			compatibilityVersion = "Xcode 3.2";
+			developmentRegion = English;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+			);
+			mainGroup = 5B2AF689163BD0D400140997;
+			productRefGroup = 5B2AF695163BD0D400140997 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				5B2AF693163BD0D400140997 /* mtp */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		5B2AF690163BD0D400140997 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5BD433B3163BD25D006E8FCE /* libmtp.c in Sources */,
+				5BD433B6163BD25D006E8FCE /* libusb1-glue.c in Sources */,
+				5BD433B8163BD25D006E8FCE /* playlist-spl.c in Sources */,
+				5BD433B9163BD25D006E8FCE /* ptp-pack.c in Sources */,
+				5BD433BA163BD25D006E8FCE /* ptp.c in Sources */,
+				5BD433BB163BD25D006E8FCE /* unicode.c in Sources */,
+				5BD433BC163BD25D006E8FCE /* util.c in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		5B2AF696163BD0D400140997 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = "$(ARCHS_STANDARD_64_BIT)";
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu99;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_ENABLE_OBJC_EXCEPTIONS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 10.8;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		5B2AF697163BD0D400140997 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = "$(ARCHS_STANDARD_64_BIT)";
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				GCC_C_LANGUAGE_STANDARD = gnu99;
+				GCC_ENABLE_OBJC_EXCEPTIONS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 10.8;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		5B2AF699163BD0D400140997 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD_32_64_BIT)";
+				EXECUTABLE_PREFIX = lib;
+				HEADER_SEARCH_PATHS = "\"$(SRCROOT)/../usb/libusb\"";
+				OTHER_CFLAGS = "-DHAVE_LIBUSB1=1";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Debug;
+		};
+		5B2AF69A163BD0D400140997 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD_32_64_BIT)";
+				EXECUTABLE_PREFIX = lib;
+				HEADER_SEARCH_PATHS = "\"$(SRCROOT)/../usb/libusb\"";
+				OTHER_CFLAGS = "-DHAVE_LIBUSB1=1";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		5B2AF68E163BD0D400140997 /* Build configuration list for PBXProject "mtp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5B2AF696163BD0D400140997 /* Debug */,
+				5B2AF697163BD0D400140997 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		5B2AF698163BD0D400140997 /* Build configuration list for PBXNativeTarget "mtp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5B2AF699163BD0D400140997 /* Debug */,
+				5B2AF69A163BD0D400140997 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 5B2AF68B163BD0D400140997 /* Project object */;
+}
