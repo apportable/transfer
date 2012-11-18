@@ -185,13 +185,23 @@ LIBMTP_filetype_t find_filetype(const char * filename)
 }
 
 
+static void usage()
+{
+    printf("transfer <file>\n");
+}
+
 int main(int argc, const char * argv[])
 {
     int err = 0;
     LIBMTP_folder_t *folders = NULL;
     LIBMTP_file_t *files = NULL;
-
+    if (argc < 2)
+    {
+        usage();
+        return -1;
+    }
     const char *from_path = argv[1];
+    
     printf("Searching for devices...\r");
     fflush(stdout);
     LIBMTP_Init();
@@ -244,6 +254,7 @@ int main(int argc, const char * argv[])
             system(cmd);
             free(cmd);
             printf("Install complete.\n");
+            err = 0;
         }
         else
         {
@@ -267,7 +278,7 @@ int main(int argc, const char * argv[])
         }
         system(cmd);
         free(cmd);
-        err = -3;
+        err = 0;
     }
 
     return err;
