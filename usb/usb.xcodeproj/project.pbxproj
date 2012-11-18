@@ -252,7 +252,9 @@
 			buildSettings = {
 				ARCHS = "$(ARCHS_STANDARD_32_64_BIT)";
 				EXECUTABLE_PREFIX = lib;
+				GCC_VERSION = "";
 				HEADER_SEARCH_PATHS = "$(SRCROOT)/libusb";
+				ONLY_ACTIVE_ARCH = NO;
 				OTHER_CFLAGS = "-DLIBUSB_DESCRIBE=\"\"";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
@@ -263,6 +265,7 @@
 			buildSettings = {
 				ARCHS = "$(ARCHS_STANDARD_32_64_BIT)";
 				EXECUTABLE_PREFIX = lib;
+				GCC_VERSION = "";
 				HEADER_SEARCH_PATHS = "$(SRCROOT)/libusb";
 				OTHER_CFLAGS = "-DLIBUSB_DESCRIBE=\"\"";
 				PRODUCT_NAME = "$(TARGET_NAME)";

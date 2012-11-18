@@ -226,7 +226,9 @@
 			buildSettings = {
 				ARCHS = "$(ARCHS_STANDARD_32_64_BIT)";
 				EXECUTABLE_PREFIX = lib;
+				GCC_VERSION = "";
 				HEADER_SEARCH_PATHS = "\"$(SRCROOT)/../usb/libusb\"";
+				ONLY_ACTIVE_ARCH = NO;
 				OTHER_CFLAGS = "-DHAVE_LIBUSB1=1";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
@@ -237,6 +239,7 @@
 			buildSettings = {
 				ARCHS = "$(ARCHS_STANDARD_32_64_BIT)";
 				EXECUTABLE_PREFIX = lib;
+				GCC_VERSION = "";
 				HEADER_SEARCH_PATHS = "\"$(SRCROOT)/../usb/libusb\"";
 				OTHER_CFLAGS = "-DHAVE_LIBUSB1=1";
 				PRODUCT_NAME = "$(TARGET_NAME)";
