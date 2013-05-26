@@ -265,7 +265,7 @@ int main(int argc, const char * argv[])
     }
     else
     {
-        printf("No mtp compatable devices found: Falling back to slow path\n");
+        printf("No mtp compatible devices found: Falling back to slow path\n");
         char *sdk_root = getenv("ANDROID_SDK");
         char *cmd = (char *)calloc(1, 1024);
         if (sdk_root == NULL)
