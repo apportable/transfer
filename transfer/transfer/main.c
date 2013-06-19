@@ -221,6 +221,10 @@ int main(int argc, const char * argv[])
             }
         }
         folders = LIBMTP_Get_Folder_List(device);
+        if (folders == NULL) {
+            fprintf(stderr, "Could not get device folders");
+            return -1;
+        }
 
         LIBMTP_file_t *f = LIBMTP_new_file_t();
         struct stat sb;
