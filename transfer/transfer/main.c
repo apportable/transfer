@@ -242,17 +242,22 @@ int main(int argc, const char * argv[])
         {
             printf("Transfer complete.                                                          \n"); // clear out the progress too
             char *sdk_root = getenv("ANDROID_SDK");
-            char *cmd = (char *)calloc(1, 1024);
+            char *install_cmd = (char *)calloc(1, 1024);
+            char *rm_cmd = (char *)calloc(1, 1024);
             if (sdk_root == NULL)
             {
-                sprintf(cmd, "adb shell pm install -r /sdcard/%s", filename);
+                sprintf(install_cmd, "adb shell pm install -r /sdcard/%s", filename);
+                sprintf(rm_cmd, "adb shell rm /sdcard/%s", filename);
             }
             else
             {
-                sprintf(cmd, "%s/platform-tools/adb shell pm install -r /sdcard/%s", sdk_root, filename);
+                sprintf(install_cmd, "%s/platform-tools/adb shell pm install -r /sdcard/%s", sdk_root, filename);
+                sprintf(rm_cmd, "%s/platform-tools/adb shell rm /sdcard/%s", sdk_root, filename);
             }
-            system(cmd);
-            free(cmd);
+            system(install_cmd);
+            system(rm_cmd);
+            free(install_cmd);
+            free(rm_cmd);
             printf("Install complete.\n");
             err = 0;
         }
