@@ -10,9 +10,9 @@
 		5B2AF6D3163BD14A00140997 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5B2AF6D2163BD14A00140997 /* Foundation.framework */; };
 		5B9F42121655951B000D94E6 /* main.c in Sources */ = {isa = PBXBuildFile; fileRef = 5B2AF6D5163BD14A00140997 /* main.c */; };
 		5BD433B1163BD218006E8FCE /* libmtp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 5BD433A4163BD1EC006E8FCE /* libmtp.a */; };
-		5BD433B2163BD218006E8FCE /* libusb.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 5BD433AA163BD1EC006E8FCE /* libusb.a */; };
 		5BD433BF163BD895006E8FCE /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5BD433BE163BD895006E8FCE /* IOKit.framework */; };
 		5BD433C1163BD89D006E8FCE /* libiconv.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 5BD433C0163BD89D006E8FCE /* libiconv.dylib */; };
+		F80B04D61897477400E86A05 /* libusb-1.0.0.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = F8C672A0189744B60014D61F /* libusb-1.0.0.dylib */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -23,26 +23,54 @@
 			remoteGlobalIDString = 5B2AF694163BD0D400140997;
 			remoteInfo = mtp;
 		};
-		5BD433A9163BD1EC006E8FCE /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 5B2AF6E5163BD1D300140997 /* usb.xcodeproj */;
-			proxyType = 2;
-			remoteGlobalIDString = 5B2AF5E9163BCE8E00140997;
-			remoteInfo = usb;
-		};
-		5BD433AB163BD1F3006E8FCE /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 5B2AF6E5163BD1D300140997 /* usb.xcodeproj */;
-			proxyType = 1;
-			remoteGlobalIDString = 5B2AF5E8163BCE8E00140997;
-			remoteInfo = usb;
-		};
 		5BD433AD163BD1F3006E8FCE /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 5B2AF6E4163BD1CD00140997 /* mtp.xcodeproj */;
 			proxyType = 1;
 			remoteGlobalIDString = 5B2AF693163BD0D400140997;
 			remoteInfo = mtp;
+		};
+		F8C6729F189744B60014D61F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5B2AF6E5163BD1D300140997 /* libusb.xcodeproj */;
+			proxyType = 2;
+			remoteGlobalIDString = 008FBF311628B79300BC5BE2;
+			remoteInfo = libusb;
+		};
+		F8C672A1189744B60014D61F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5B2AF6E5163BD1D300140997 /* libusb.xcodeproj */;
+			proxyType = 2;
+			remoteGlobalIDString = 008FBFBD1628B9FE00BC5BE2;
+			remoteInfo = xusb;
+		};
+		F8C672A3189744B60014D61F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5B2AF6E5163BD1D300140997 /* libusb.xcodeproj */;
+			proxyType = 2;
+			remoteGlobalIDString = 008FBFF51628BB8B00BC5BE2;
+			remoteInfo = dpfp;
+		};
+		F8C672A5189744B60014D61F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5B2AF6E5163BD1D300140997 /* libusb.xcodeproj */;
+			proxyType = 2;
+			remoteGlobalIDString = 008FC0051628BBDB00BC5BE2;
+			remoteInfo = dpfp_threaded;
+		};
+		F8C672A7189744B60014D61F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5B2AF6E5163BD1D300140997 /* libusb.xcodeproj */;
+			proxyType = 2;
+			remoteGlobalIDString = 008FC0151628BC0300BC5BE2;
+			remoteInfo = fxload;
+		};
+		F8C672A9189744B60014D61F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5B2AF6E5163BD1D300140997 /* libusb.xcodeproj */;
+			proxyType = 2;
+			remoteGlobalIDString = 008FC0261628BC6B00BC5BE2;
+			remoteInfo = listdevs;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -63,7 +91,7 @@
 		5B2AF6D2163BD14A00140997 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		5B2AF6D5163BD14A00140997 /* main.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = main.c; sourceTree = "<group>"; };
 		5B2AF6E4163BD1CD00140997 /* mtp.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = mtp.xcodeproj; path = ../mtp/mtp.xcodeproj; sourceTree = "<group>"; };
-		5B2AF6E5163BD1D300140997 /* usb.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = usb.xcodeproj; path = ../usb/usb.xcodeproj; sourceTree = "<group>"; };
+		5B2AF6E5163BD1D300140997 /* libusb.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = libusb.xcodeproj; path = ../usb/Xcode/libusb.xcodeproj; sourceTree = "<group>"; };
 		5BD433BE163BD895006E8FCE /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
 		5BD433C0163BD89D006E8FCE /* libiconv.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libiconv.dylib; path = usr/lib/libiconv.dylib; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
@@ -73,10 +101,10 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F80B04D61897477400E86A05 /* libusb-1.0.0.dylib in Frameworks */,
 				5BD433C1163BD89D006E8FCE /* libiconv.dylib in Frameworks */,
 				5BD433BF163BD895006E8FCE /* IOKit.framework in Frameworks */,
 				5BD433B1163BD218006E8FCE /* libmtp.a in Frameworks */,
-				5BD433B2163BD218006E8FCE /* libusb.a in Frameworks */,
 				5B2AF6D3163BD14A00140997 /* Foundation.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -87,7 +115,7 @@
 		5B2AF6C3163BD14A00140997 = {
 			isa = PBXGroup;
 			children = (
-				5B2AF6E5163BD1D300140997 /* usb.xcodeproj */,
+				5B2AF6E5163BD1D300140997 /* libusb.xcodeproj */,
 				5B2AF6E4163BD1CD00140997 /* mtp.xcodeproj */,
 				5B2AF6D4163BD14A00140997 /* transfer */,
 				5B2AF6D1163BD14A00140997 /* Frameworks */,
@@ -129,10 +157,15 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		5BD433A6163BD1EC006E8FCE /* Products */ = {
+		F8C67296189744B60014D61F /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				5BD433AA163BD1EC006E8FCE /* libusb.a */,
+				F8C672A0189744B60014D61F /* libusb-1.0.0.dylib */,
+				F8C672A2189744B60014D61F /* xusb */,
+				F8C672A4189744B60014D61F /* dpfp */,
+				F8C672A6189744B60014D61F /* dpfp_threaded */,
+				F8C672A8189744B60014D61F /* fxload */,
+				F8C672AA189744B60014D61F /* listdevs */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -151,7 +184,6 @@
 			buildRules = (
 			);
 			dependencies = (
-				5BD433AC163BD1F3006E8FCE /* PBXTargetDependency */,
 				5BD433AE163BD1F3006E8FCE /* PBXTargetDependency */,
 			);
 			name = transfer;
@@ -180,12 +212,12 @@
 			projectDirPath = "";
 			projectReferences = (
 				{
-					ProductGroup = 5BD433A0163BD1EC006E8FCE /* Products */;
-					ProjectRef = 5B2AF6E4163BD1CD00140997 /* mtp.xcodeproj */;
+					ProductGroup = F8C67296189744B60014D61F /* Products */;
+					ProjectRef = 5B2AF6E5163BD1D300140997 /* libusb.xcodeproj */;
 				},
 				{
-					ProductGroup = 5BD433A6163BD1EC006E8FCE /* Products */;
-					ProjectRef = 5B2AF6E5163BD1D300140997 /* usb.xcodeproj */;
+					ProductGroup = 5BD433A0163BD1EC006E8FCE /* Products */;
+					ProjectRef = 5B2AF6E4163BD1CD00140997 /* mtp.xcodeproj */;
 				},
 			);
 			projectRoot = "";
@@ -203,11 +235,46 @@
 			remoteRef = 5BD433A3163BD1EC006E8FCE /* PBXContainerItemProxy */;
 			sourceTree = BUILT_PRODUCTS_DIR;
 		};
-		5BD433AA163BD1EC006E8FCE /* libusb.a */ = {
+		F8C672A0189744B60014D61F /* libusb-1.0.0.dylib */ = {
 			isa = PBXReferenceProxy;
-			fileType = archive.ar;
-			path = libusb.a;
-			remoteRef = 5BD433A9163BD1EC006E8FCE /* PBXContainerItemProxy */;
+			fileType = "compiled.mach-o.dylib";
+			path = "libusb-1.0.0.dylib";
+			remoteRef = F8C6729F189744B60014D61F /* PBXContainerItemProxy */;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		F8C672A2189744B60014D61F /* xusb */ = {
+			isa = PBXReferenceProxy;
+			fileType = "compiled.mach-o.executable";
+			path = xusb;
+			remoteRef = F8C672A1189744B60014D61F /* PBXContainerItemProxy */;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		F8C672A4189744B60014D61F /* dpfp */ = {
+			isa = PBXReferenceProxy;
+			fileType = "compiled.mach-o.executable";
+			path = dpfp;
+			remoteRef = F8C672A3189744B60014D61F /* PBXContainerItemProxy */;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		F8C672A6189744B60014D61F /* dpfp_threaded */ = {
+			isa = PBXReferenceProxy;
+			fileType = "compiled.mach-o.executable";
+			path = dpfp_threaded;
+			remoteRef = F8C672A5189744B60014D61F /* PBXContainerItemProxy */;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		F8C672A8189744B60014D61F /* fxload */ = {
+			isa = PBXReferenceProxy;
+			fileType = "compiled.mach-o.executable";
+			path = fxload;
+			remoteRef = F8C672A7189744B60014D61F /* PBXContainerItemProxy */;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		F8C672AA189744B60014D61F /* listdevs */ = {
+			isa = PBXReferenceProxy;
+			fileType = "compiled.mach-o.executable";
+			path = listdevs;
+			remoteRef = F8C672A9189744B60014D61F /* PBXContainerItemProxy */;
 			sourceTree = BUILT_PRODUCTS_DIR;
 		};
 /* End PBXReferenceProxy section */
@@ -224,11 +291,6 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		5BD433AC163BD1F3006E8FCE /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			name = usb;
-			targetProxy = 5BD433AB163BD1F3006E8FCE /* PBXContainerItemProxy */;
-		};
 		5BD433AE163BD1F3006E8FCE /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			name = mtp;

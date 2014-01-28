@@ -3,11 +3,14 @@
 /* Default visibility */
 #undef DEFAULT_VISIBILITY
 
-/* Debug message logging */
+/* Start with debug message logging enabled */
 #undef ENABLE_DEBUG_LOGGING
 
 /* Message logging */
 #undef ENABLE_LOGGING
+
+/* Define to 1 if you have the <asm/types.h> header file. */
+#undef HAVE_ASM_TYPES_H
 
 /* Define to 1 if you have the <dlfcn.h> header file. */
 #undef HAVE_DLFCN_H
@@ -18,11 +21,26 @@
 /* Define to 1 if you have the <inttypes.h> header file. */
 #undef HAVE_INTTYPES_H
 
+/* Define to 1 if you have the `udev' library (-ludev). */
+#undef HAVE_LIBUDEV
+
+/* Define to 1 if you have the <libudev.h> header file. */
+#undef HAVE_LIBUDEV_H
+
+/* Define to 1 if you have the <linux/filter.h> header file. */
+#undef HAVE_LINUX_FILTER_H
+
+/* Define to 1 if you have the <linux/netlink.h> header file. */
+#undef HAVE_LINUX_NETLINK_H
+
 /* Define to 1 if you have the <memory.h> header file. */
 #undef HAVE_MEMORY_H
 
 /* Define to 1 if you have the <poll.h> header file. */
 #undef HAVE_POLL_H
+
+/* Define to 1 if you have the <signal.h> header file. */
+#undef HAVE_SIGNAL_H
 
 /* Define to 1 if you have the <stdint.h> header file. */
 #undef HAVE_STDINT_H
@@ -38,6 +56,15 @@
 
 /* Define to 1 if the system has the type `struct timespec'. */
 #undef HAVE_STRUCT_TIMESPEC
+
+/* syslog() function available */
+#undef HAVE_SYSLOG_FUNC
+
+/* Define to 1 if you have the <syslog.h> header file. */
+#undef HAVE_SYSLOG_H
+
+/* Define to 1 if you have the <sys/socket.h> header file. */
+#undef HAVE_SYS_SOCKET_H
 
 /* Define to 1 if you have the <sys/stat.h> header file. */
 #undef HAVE_SYS_STAT_H
@@ -63,6 +90,9 @@
 
 /* Linux backend */
 #undef OS_LINUX
+
+/* NetBSD backend */
+#undef OS_NETBSD
 
 /* OpenBSD backend */
 #undef OS_OPENBSD
@@ -102,6 +132,12 @@
 
 /* timerfd headers available */
 #undef USBI_TIMERFD_AVAILABLE
+
+/* Enable output to system log */
+#undef USE_SYSTEM_LOGGING_FACILITY
+
+/* Use udev for device enumeration/hotplug */
+#undef USE_UDEV
 
 /* Version number of package */
 #undef VERSION
