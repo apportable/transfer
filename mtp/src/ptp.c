@@ -23,8 +23,12 @@
  */
 
 #define _BSD_SOURCE
-
+#include "config.h"
 #include "ptp.h"
+
+#ifdef HAVE_LIBXML2
+# include <libxml/parser.h>
+#endif
 
 #include <stdlib.h>
 #include <stdarg.h>
@@ -62,36 +66,36 @@ static uint16_t ptp_exit_send_memory_handler (PTPDataHandler *handler);
 
 void
 ptp_debug (PTPParams *params, const char *format, ...)
-{  
-        va_list args;
-
-        va_start (args, format);
-        if (params->debug_func!=NULL)
-                params->debug_func (params->data, format, args);
-        else
+{
+    va_list args;
+    
+    va_start (args, format);
+    if (params->debug_func!=NULL)
+        params->debug_func (params->data, format, args);
+    else
 	{
-                vfprintf (stderr, format, args);
+        vfprintf (stderr, format, args);
 		fprintf (stderr,"\n");
 		fflush (stderr);
 	}
-        va_end (args);
-}  
+    va_end (args);
+}
 
 void
 ptp_error (PTPParams *params, const char *format, ...)
-{  
-        va_list args;
-
-        va_start (args, format);
-        if (params->error_func!=NULL)
-                params->error_func (params->data, format, args);
-        else
+{
+    va_list args;
+    
+    va_start (args, format);
+    if (params->error_func!=NULL)
+        params->error_func (params->data, format, args);
+    else
 	{
-                vfprintf (stderr, format, args);
+        vfprintf (stderr, format, args);
 		fprintf (stderr,"\n");
 		fflush (stderr);
 	}
-        va_end (args);
+    va_end (args);
 }
 
 /* Pack / unpack functions */
@@ -119,7 +123,7 @@ ptp_error (PTPParams *params, const char *format, ...)
  * filled in (i.e. operation code and parameters). It's up to caller to do
  * so.
  * The flags decide thether the transaction has a data phase and what is its
- * direction (send or receive). 
+ * direction (send or receive).
  * If transaction is sending data the sendlen should contain its length in
  * bytes, otherwise it's ignored.
  * The data should contain an address of a pointer to data going to be sent
@@ -134,17 +138,17 @@ ptp_error (PTPParams *params, const char *format, ...)
  * Upon success PTPContainer* ptp contains PTP Response Phase container with
  * all fields filled in.
  **/
-static uint16_t
-ptp_transaction_new (PTPParams* params, PTPContainer* ptp, 
-		uint16_t flags, unsigned int sendlen,
-		PTPDataHandler *handler
-) {
+uint16_t
+ptp_transaction_new (PTPParams* params, PTPContainer* ptp,
+                     uint16_t flags, uint64_t sendlen,
+                     PTPDataHandler *handler
+                     ) {
 	int 		tries;
 	uint16_t	cmd;
-
-	if ((params==NULL) || (ptp==NULL)) 
+    
+	if ((params==NULL) || (ptp==NULL))
 		return PTP_ERROR_BADPARAM;
-
+    
 	cmd = ptp->Code;
 	ptp->Transaction_ID=params->transaction_id++;
 	ptp->SessionID=params->session_id;
@@ -152,39 +156,39 @@ ptp_transaction_new (PTPParams* params, PTPContainer* ptp,
 	CHECK_PTP_RC(params->sendreq_func (params, ptp));
 	/* is there a dataphase? */
 	switch (flags&PTP_DP_DATA_MASK) {
-	case PTP_DP_SENDDATA:
+        case PTP_DP_SENDDATA:
 		{
 			uint16_t ret;
 			ret = params->senddata_func(params, ptp,
-						    sendlen, handler);
+                                        sendlen, handler);
 			if (ret == PTP_ERROR_CANCEL) {
-				ret = params->cancelreq_func(params, 
-							     params->transaction_id-1);
+				ret = params->cancelreq_func(params,
+                                             params->transaction_id-1);
 				if (ret == PTP_RC_OK)
 					ret = PTP_ERROR_CANCEL;
 			}
 			if (ret != PTP_RC_OK)
 				return ret;
 		}
-		break;
-	case PTP_DP_GETDATA:
+            break;
+        case PTP_DP_GETDATA:
 		{
 			uint16_t ret;
 			ret = params->getdata_func(params, ptp, handler);
 			if (ret == PTP_ERROR_CANCEL) {
-				ret = params->cancelreq_func(params, 
-							     params->transaction_id-1);
+				ret = params->cancelreq_func(params,
+                                             params->transaction_id-1);
 				if (ret == PTP_RC_OK)
 					ret = PTP_ERROR_CANCEL;
 			}
 			if (ret != PTP_RC_OK)
 				return ret;
 		}
-		break;
-	case PTP_DP_NODATA:
-		break;
-	default:
-		return PTP_ERROR_BADPARAM;
+            break;
+        case PTP_DP_NODATA:
+            break;
+        default:
+            return PTP_ERROR_BADPARAM;
 	}
 	tries = 3;
 	while (tries--) {
@@ -202,9 +206,9 @@ ptp_transaction_new (PTPParams* params, PTPContainer* ptp,
 		if (ptp->Transaction_ID < params->transaction_id-1) {
 			tries++;
 			ptp_debug (params,
-				"PTP: Sequence number mismatch %d vs expected %d, suspecting old reply.",
-				ptp->Transaction_ID, params->transaction_id-1
-			);
+                       "PTP: Sequence number mismatch %d vs expected %d, suspecting old reply.",
+                       ptp->Transaction_ID, params->transaction_id-1
+                       );
 			continue;
 		}
 		if (ptp->Transaction_ID != params->transaction_id-1) {
@@ -212,9 +216,9 @@ ptp_transaction_new (PTPParams* params, PTPContainer* ptp,
 			if ((cmd == PTP_OC_OpenSession) && tries)
 				continue;
 			ptp_error (params,
-				"PTP: Sequence number mismatch %d vs expected %d.",
-				ptp->Transaction_ID, params->transaction_id-1
-			);
+                       "PTP: Sequence number mismatch %d vs expected %d.",
+                       ptp->Transaction_ID, params->transaction_id-1
+                       );
 			return PTP_ERROR_BADPARAM;
 		}
 		break;
@@ -230,12 +234,12 @@ typedef struct {
 
 static uint16_t
 memory_getfunc(PTPParams* params, void* private,
-	       unsigned long wantlen, unsigned char *data,
-	       unsigned long *gotlen
-) {
+               unsigned long wantlen, unsigned char *data,
+               unsigned long *gotlen
+               ) {
 	PTPMemHandlerPrivate* priv = (PTPMemHandlerPrivate*)private;
 	unsigned long tocopy = wantlen;
-
+    
 	if (priv->curoff + tocopy > priv->size)
 		tocopy = priv->size - priv->curoff;
 	memcpy (data, priv->data + priv->curoff, tocopy);
@@ -246,11 +250,11 @@ memory_getfunc(PTPParams* params, void* private,
 
 static uint16_t
 memory_putfunc(PTPParams* params, void* private,
-	       unsigned long sendlen, unsigned char *data,
-	       unsigned long *putlen
-) {
+               unsigned long sendlen, unsigned char *data,
+               unsigned long *putlen
+               ) {
 	PTPMemHandlerPrivate* priv = (PTPMemHandlerPrivate*)private;
-
+    
 	if (priv->curoff + sendlen > priv->size) {
 		priv->data = realloc (priv->data, priv->curoff+sendlen);
 		if (!priv->data)
@@ -284,8 +288,8 @@ ptp_init_recv_memory_handler(PTPDataHandler *handler) {
  */
 static uint16_t
 ptp_init_send_memory_handler(PTPDataHandler *handler,
-	unsigned char *data, unsigned long len
-) {
+                             unsigned char *data, unsigned long len
+                             ) {
 	PTPMemHandlerPrivate* priv;
 	priv = malloc (sizeof(PTPMemHandlerPrivate));
 	if (!priv)
@@ -311,8 +315,8 @@ ptp_exit_send_memory_handler (PTPDataHandler *handler) {
 /* hand over our internal data to caller */
 static uint16_t
 ptp_exit_recv_memory_handler (PTPDataHandler *handler,
-	unsigned char **data, unsigned long *size
-) {
+                              unsigned char **data, unsigned long *size
+                              ) {
 	PTPMemHandlerPrivate* priv = (PTPMemHandlerPrivate*)handler->priv;
 	*data = priv->data;
 	*size = priv->size;
@@ -329,10 +333,10 @@ static uint16_t
 fd_getfunc(PTPParams* params, void* private,
 	       unsigned long wantlen, unsigned char *data,
 	       unsigned long *gotlen
-) {
+           ) {
 	PTPFDHandlerPrivate* priv = (PTPFDHandlerPrivate*)private;
 	int		got;
-
+    
 	got = read (priv->fd, data, wantlen);
 	if (got != -1)
 		*gotlen = got;
@@ -345,10 +349,10 @@ static uint16_t
 fd_putfunc(PTPParams* params, void* private,
 	       unsigned long sendlen, unsigned char *data,
 	       unsigned long *putlen
-) {
+           ) {
 	int		written;
 	PTPFDHandlerPrivate* priv = (PTPFDHandlerPrivate*)private;
-
+    
 	written = write (priv->fd, data, sendlen);
 	if (written != -1)
 		*putlen = written;
@@ -378,36 +382,38 @@ ptp_exit_fd_handler (PTPDataHandler *handler) {
 }
 
 /* Old style transaction, based on memory */
-static uint16_t
-ptp_transaction (PTPParams* params, PTPContainer* ptp, 
-		uint16_t flags, unsigned int sendlen,
-		unsigned char **data, unsigned int *recvlen
-) {
+uint16_t
+ptp_transaction (PTPParams* params, PTPContainer* ptp,
+                 uint16_t flags, uint64_t sendlen,
+                 unsigned char **data, unsigned int *recvlen
+                 ) {
 	PTPDataHandler	handler;
 	uint16_t	ret;
-
+    
 	switch (flags & PTP_DP_DATA_MASK) {
-	case PTP_DP_SENDDATA:
-		ptp_init_send_memory_handler (&handler, *data, sendlen);
-		break;
-	case PTP_DP_GETDATA:
-		ptp_init_recv_memory_handler (&handler);
-		break;
-	default:break;
+        case PTP_DP_SENDDATA:
+            ret = ptp_init_send_memory_handler (&handler, *data, sendlen);
+            if (ret != PTP_RC_OK) return ret;
+            break;
+        case PTP_DP_GETDATA:
+            ret = ptp_init_recv_memory_handler (&handler);
+            if (ret != PTP_RC_OK) return ret;
+            break;
+        default:break;
 	}
 	ret = ptp_transaction_new (params, ptp, flags, sendlen, &handler);
 	switch (flags & PTP_DP_DATA_MASK) {
-	case PTP_DP_SENDDATA:
-		ptp_exit_send_memory_handler (&handler);
-		break;
-	case PTP_DP_GETDATA: {
-		unsigned long len;
-		ptp_exit_recv_memory_handler (&handler, data, &len);
-		if (recvlen)
-			*recvlen = len;
-		break;
-	}
-	default:break;
+        case PTP_DP_SENDDATA:
+            ptp_exit_send_memory_handler (&handler);
+            break;
+        case PTP_DP_GETDATA: {
+            unsigned long len;
+            ptp_exit_recv_memory_handler (&handler, data, &len);
+            if (recvlen)
+                *recvlen = len;
+            break;
+        }
+        default:break;
 	}
 	return ret;
 }
@@ -437,7 +443,7 @@ ptp_getdeviceinfo (PTPParams* params, PTPDeviceInfo* deviceinfo)
 	PTPContainer	ptp;
 	unsigned char*	di=NULL;
 	PTPDataHandler	handler;
-
+    
 	ptp_init_recv_memory_handler (&handler);
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_GetDeviceInfo;
@@ -459,7 +465,7 @@ ptp_canon_eos_getdeviceinfo (PTPParams* params, PTPCanonEOSDeviceInfo*di)
 	PTPDataHandler	handler;
 	unsigned long	len;
 	unsigned char	*data;
-
+    
 	ptp_init_recv_memory_handler (&handler);
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_CANON_EOS_GetDeviceInfoEx;
@@ -470,6 +476,465 @@ ptp_canon_eos_getdeviceinfo (PTPParams* params, PTPCanonEOSDeviceInfo*di)
 	ptp_exit_recv_memory_handler (&handler, &data, &len);
 	if (ret == PTP_RC_OK) ptp_unpack_EOS_DI(params, data, di, len);
 	free (data);
+	return ret;
+}
+
+#ifdef HAVE_LIBXML2
+static int
+traverse_tree (PTPParams *params, int depth, xmlNodePtr node) {
+	xmlNodePtr	next;
+	xmlChar		*xchar;
+	int n;
+	char 		*xx;
+    
+    
+	if (!node) return 0;
+	xx = malloc(depth * 4 + 1);
+	memset (xx, ' ', depth*4);
+	xx[depth*4] = 0;
+    
+	n = xmlChildElementCount (node);
+    
+	next = node;
+	do {
+		fprintf(stderr,"%snode %s\n", xx,next->name);
+		fprintf(stderr,"%selements %d\n", xx,n);
+		xchar = xmlNodeGetContent (next);
+		fprintf(stderr,"%scontent %s\n", xx,xchar);
+		traverse_tree (params, depth+1,xmlFirstElementChild (next));
+	} while ((next = xmlNextElementSibling (next)));
+	return PTP_RC_OK;
+}
+
+static int
+parse_9301_cmd_tree (PTPParams *params, xmlNodePtr node, PTPDeviceInfo *di) {
+	xmlNodePtr next;
+	int	cnt;
+    
+	cnt = 0;
+	next = xmlFirstElementChild (node);
+	while (next) {
+		cnt++;
+		next = xmlNextElementSibling (next);
+	}
+	di->OperationsSupported_len = cnt;
+	di->OperationsSupported = malloc (cnt*sizeof(di->OperationsSupported[0]));
+	cnt = 0;
+	next = xmlFirstElementChild (node);
+	while (next) {
+		unsigned int p;
+        
+		sscanf((char*)next->name, "c%04x", &p);
+		ptp_debug( params, "cmd %s / 0x%04x", next->name, p);
+		di->OperationsSupported[cnt++] = p;
+		next = xmlNextElementSibling (next);
+	}
+	return PTP_RC_OK;
+}
+
+static int
+parse_9301_value (PTPParams *params, const char *str, uint16_t type, PTPPropertyValue *propval) {
+	switch (type) {
+        case 6: { /*UINT32*/
+            unsigned int x;
+            if (!sscanf(str,"%08x", &x)) {
+                ptp_debug( params, "could not parse uint32 %s", str);
+                return PTP_RC_GeneralError;
+            }
+            ptp_debug( params, "\t%d", x);
+            propval->u32 = x;
+            break;
+        }
+        case 5: { /*INT32*/
+            int x;
+            if (!sscanf(str,"%08x", &x)) {
+                ptp_debug( params, "could not parse int32 %s", str);
+                return PTP_RC_GeneralError;
+            }
+            ptp_debug( params, "\t%d", x);
+            propval->i32 = x;
+            break;
+        }
+        case 4: { /*UINT16*/
+            unsigned int x;
+            if (!sscanf(str,"%04x", &x)) {
+                ptp_debug( params, "could not parse uint16 %s", str);
+                return PTP_RC_GeneralError;
+            }
+            ptp_debug( params, "\t%d", x);
+            propval->u16 = x;
+            break;
+        }
+        case 3: { /*INT16*/
+            int x;
+            if (!sscanf(str,"%04x", &x)) {
+                ptp_debug( params, "could not parse int16 %s", str);
+                return PTP_RC_GeneralError;
+            }
+            ptp_debug( params, "\t%d", x);
+            propval->i16 = x;
+            break;
+        }
+        case 2: { /*UINT8*/
+            unsigned int x;
+            if (!sscanf(str,"%02x", &x)) {
+                ptp_debug( params, "could not parse uint8 %s", str);
+                return PTP_RC_GeneralError;
+            }
+            ptp_debug( params, "\t%d", x);
+            propval->u8 = x;
+            break;
+        }
+        case 1: { /*INT8*/
+            int x;
+            if (!sscanf(str,"%02x", &x)) {
+                ptp_debug( params, "could not parse int8 %s", str);
+                return PTP_RC_GeneralError;
+            }
+            ptp_debug( params, "\t%d", x);
+            propval->i8 = x;
+            break;
+        }
+        case 65535: { /* string */
+            int len;
+            
+            /* ascii ptp string, 1 byte length, little endian 16 bit chars */
+            if (sscanf(str,"%02x", &len)) {
+                int i;
+                char *xstr = malloc(len+1);
+                for (i=0;i<len;i++) {
+                    int xc;
+                    if (sscanf(str+2+i*4,"%04x", &xc)) {
+                        int cx;
+                        
+                        cx = ((xc>>8) & 0xff) | ((xc & 0xff) << 8);
+                        xstr[i] = cx;
+                    }
+                    xstr[len] = 0;
+                }
+                ptp_debug( params, "\t%s", xstr);
+                propval->str = xstr;
+                break;
+            }
+            ptp_debug( params, "string %s not parseable!", str);
+            return PTP_RC_GeneralError;
+        }
+        case 7: /*INT64*/
+        case 8: /*UINT64*/
+        case 9: /*INT128*/
+        case 10: /*UINT128*/
+        default:
+            ptp_debug( params, "unhandled data type %d!", type);
+            return PTP_RC_GeneralError;
+	}
+	return PTP_RC_OK;
+}
+
+static int
+parse_9301_propdesc (PTPParams *params, xmlNodePtr next, PTPDevicePropDesc *dpd) {
+	int type = -1;
+    
+	if (!next)
+		return PTP_RC_GeneralError;
+    
+	ptp_debug (params, "parse_9301_propdesc");
+	dpd->FormFlag	= PTP_DPFF_None;
+	dpd->GetSet	= PTP_DPGS_Get;
+	do {
+		if (!strcmp((char*)next->name,"type")) {	/* propdesc.DataType */
+			if (!sscanf((char*)xmlNodeGetContent (next), "%04x", &type)) {
+				ptp_debug( params, "\ttype %s not parseable?",xmlNodeGetContent (next));
+				return 0;
+			}
+			ptp_debug( params, "type 0x%x", type);
+			dpd->DataType = type;
+			continue;
+		}
+		if (!strcmp((char*)next->name,"attribute")) {	/* propdesc.GetSet */
+			int attr;
+            
+			if (!sscanf((char*)xmlNodeGetContent (next), "%02x", &attr)) {
+				ptp_debug( params, "\tattr %s not parseable",xmlNodeGetContent (next));
+				return 0;
+			}
+			ptp_debug( params, "attribute 0x%x", attr);
+			dpd->GetSet = attr;
+			continue;
+		}
+		if (!strcmp((char*)next->name,"default")) {	/* propdesc.FactoryDefaultValue */
+			ptp_debug( params, "default value");
+			parse_9301_value (params, (char*)xmlNodeGetContent (next), type, &dpd->FactoryDefaultValue);
+			continue;
+		}
+		if (!strcmp((char*)next->name,"value")) {	/* propdesc.CurrentValue */
+			ptp_debug( params, "current value");
+			parse_9301_value (params, (char*)xmlNodeGetContent (next), type, &dpd->CurrentValue);
+			continue;
+		}
+		if (!strcmp((char*)next->name,"enum")) {	/* propdesc.FORM.Enum */
+			int n,i;
+			char *s;
+            
+			ptp_debug( params, "enum");
+			dpd->FormFlag = PTP_DPFF_Enumeration;
+			s = (char*)xmlNodeGetContent (next);
+			n = 0;
+			do {
+				s = strchr(s,' ');
+				if (s) s++;
+				n++;
+			} while (s);
+			dpd->FORM.Enum.NumberOfValues = n;
+			dpd->FORM.Enum.SupportedValue = malloc (n * sizeof(PTPPropertyValue));
+			s = (char*)xmlNodeGetContent (next);
+			i = 0;
+			do {
+				parse_9301_value (params, s, type, &dpd->FORM.Enum.SupportedValue[i]); /* should turn ' ' into \0? */
+				i++;
+				s = strchr(s,' ');
+				if (s) s++;
+			} while (s && (i<n));
+			continue;
+		}
+		if (!strcmp((char*)next->name,"range")) {	/* propdesc.FORM.Enum */
+			char *s = (char*)xmlNodeGetContent (next);
+			dpd->FormFlag = PTP_DPFF_Range;
+			ptp_debug( params, "range");
+			parse_9301_value (params, s, type, &dpd->FORM.Range.MinimumValue); /* should turn ' ' into \0? */
+			s = strchr(s,' ');
+			if (!s) continue;
+			s++;
+			parse_9301_value (params, s, type, &dpd->FORM.Range.MaximumValue); /* should turn ' ' into \0? */
+			s = strchr(s,' ');
+			if (!s) continue;
+			s++;
+			parse_9301_value (params, s, type, &dpd->FORM.Range.StepSize); /* should turn ' ' into \0? */
+            
+			continue;
+		}
+		ptp_debug (params, "\tpropdescvar: %s", next->name);
+		traverse_tree (params, 3, next);
+	} while ((next = xmlNextElementSibling (next)));
+	return PTP_RC_OK;
+}
+
+static int
+parse_9301_prop_tree (PTPParams *params, xmlNodePtr node, PTPDeviceInfo *di) {
+	xmlNodePtr next;
+	int	cnt;
+    
+	cnt = 0;
+	next = xmlFirstElementChild (node);
+	while (next) {
+		cnt++;
+		next = xmlNextElementSibling (next);
+	}
+    
+	di->DevicePropertiesSupported_len = cnt;
+	di->DevicePropertiesSupported = malloc (cnt*sizeof(di->DevicePropertiesSupported[0]));
+	cnt = 0;
+	next = xmlFirstElementChild (node);
+	while (next) {
+		unsigned int p;
+		PTPDevicePropDesc	dpd;
+        
+		sscanf((char*)next->name, "p%04x", &p);
+		ptp_debug( params, "prop %s / 0x%04x", next->name, p);
+		parse_9301_propdesc (params, xmlFirstElementChild (next), &dpd);
+		di->DevicePropertiesSupported[cnt++] = p;
+		next = xmlNextElementSibling (next);
+	}
+	return PTP_RC_OK;
+}
+
+static int
+parse_9301_event_tree (PTPParams *params, xmlNodePtr node, PTPDeviceInfo *di) {
+	xmlNodePtr next;
+	int	cnt;
+    
+	cnt = 0;
+	next = xmlFirstElementChild (node);
+	while (next) {
+		cnt++;
+		next = xmlNextElementSibling (next);
+	}
+	di->EventsSupported_len = cnt;
+	di->EventsSupported = malloc (cnt*sizeof(di->EventsSupported[0]));
+	cnt = 0;
+	next = xmlFirstElementChild (node);
+	while (next) {
+		unsigned int p;
+        
+		sscanf((char*)next->name, "e%04x", &p);
+		ptp_debug( params, "event %s / 0x%04x", next->name, p);
+		di->EventsSupported[cnt++] = p;
+		next = xmlNextElementSibling (next);
+	}
+	return PTP_RC_OK;
+}
+
+static int
+parse_9301_tree (PTPParams *params, xmlNodePtr node, PTPDeviceInfo *di) {
+	xmlNodePtr	next;
+    
+	next = xmlFirstElementChild (node);
+	while (next) {
+		if (!strcmp ((char*)next->name, "cmd")) {
+			parse_9301_cmd_tree (params, next, di);
+			next = xmlNextElementSibling (next);
+			continue;
+		}
+		if (!strcmp ((char*)next->name, "prop")) {
+			parse_9301_prop_tree (params, next, di);
+			next = xmlNextElementSibling (next);
+			continue;
+		}
+		if (!strcmp ((char*)next->name, "event")) {
+			parse_9301_event_tree (params, next, di);
+			next = xmlNextElementSibling (next);
+			continue;
+		}
+		fprintf (stderr,"9301: unhandled type %s\n", next->name);
+		next = xmlNextElementSibling (next);
+	}
+	/*traverse_tree (0, node);*/
+	return PTP_RC_OK;
+}
+
+static uint16_t
+ptp_olympus_parse_output_xml(PTPParams* params, char*data, int len, xmlNodePtr *code) {
+    xmlDocPtr       docin;
+    xmlNodePtr      docroot, output, next;
+	int 		result, xcode;
+    
+	*code = NULL;
+    
+    docin = xmlReadMemory ((char*)data, len, "http://gphoto.org/", "utf-8", 0);
+    if (!docin) return PTP_RC_GeneralError;
+    docroot = xmlDocGetRootElement (docin);
+    if (!docroot) {
+		xmlFreeDoc (docin);
+		return PTP_RC_GeneralError;
+	}
+    
+    if (strcmp((char*)docroot->name,"x3c")) {
+        ptp_debug (params, "olympus: docroot is not x3c, but %s", docroot->name);
+		xmlFreeDoc (docin);
+        return PTP_RC_GeneralError;
+    }
+    if (xmlChildElementCount(docroot) != 1) {
+        ptp_debug (params, "olympus: x3c: expected 1 child, got %ld", xmlChildElementCount(docroot));
+		xmlFreeDoc (docin);
+        return PTP_RC_GeneralError;
+    }
+    output = xmlFirstElementChild (docroot);
+    if (strcmp((char*)output->name, "output") != 0) {
+        ptp_debug (params, "olympus: x3c node: expected child 'output', but got %s", (char*)output->name);
+		xmlFreeDoc (docin);
+        return PTP_RC_GeneralError;
+	}
+    next = xmlFirstElementChild (output);
+    
+	result = PTP_RC_GeneralError;
+    
+	while (next) {
+		if (!strcmp((char*)next->name,"result")) {
+			xmlChar	 *xchar;
+            
+			xchar = xmlNodeGetContent (next);
+			if (!sscanf((char*)xchar,"%04x",&result))
+				ptp_debug (params, "failed scanning result from %s", xchar);
+			ptp_debug (params,  "ptp result is 0x%04x", result);
+			next = xmlNextElementSibling (next);
+			continue;
+		}
+		if (sscanf((char*)next->name,"c%x", &xcode)) {
+			ptp_debug (params,  "ptp code node found %s", (char*)next->name);
+			*code = next;
+			next = xmlNextElementSibling (next);
+			continue;
+		}
+		ptp_debug (params, "unhandled node %s", (char*)next->name);
+		next = xmlNextElementSibling (next);
+	}
+    
+	if (result != PTP_RC_OK) {
+		*code = NULL;
+		xmlFreeDoc (docin);
+	}
+	return result;
+}
+#endif
+
+uint16_t
+ptp_olympus_getdeviceinfo (PTPParams* params, PTPDeviceInfo *di)
+{
+#ifdef HAVE_LIBXML2
+	uint16_t 	ret;
+	PTPContainer	ptp;
+	PTPDataHandler	handler;
+	unsigned char	*data;
+	unsigned long	len;
+	xmlNodePtr	code;
+    
+	memset (di, 0, sizeof(PTPDeviceInfo));
+	ptp_init_recv_memory_handler (&handler);
+    
+	PTP_CNT_INIT(ptp);
+	ptp.Code   = PTP_OC_OLYMPUS_GetDeviceInfo;
+	ptp.Nparam = 0;
+	len	   = 0;
+	data       = NULL;
+	ret=ptp_transaction_new(params, &ptp, PTP_DP_GETDATA, 0, &handler);
+    
+	ptp_exit_recv_memory_handler (&handler, &data, &len);
+    
+	ret = ptp_olympus_parse_output_xml(params,(char*)data,len,&code);
+	if (ret != PTP_RC_OK)
+		return ret;
+    
+	ret = parse_9301_tree (params, code, di);
+    
+	xmlFreeDoc(code->doc);
+	return ret;
+#else
+	return PTP_RC_GeneralError;
+#endif
+}
+
+uint16_t
+ptp_olympus_opensession (PTPParams* params, unsigned char**data, unsigned long *len)
+{
+	uint16_t 	ret;
+	PTPContainer	ptp;
+	PTPDataHandler	handler;
+    
+	ptp_init_recv_memory_handler (&handler);
+	PTP_CNT_INIT(ptp);
+	ptp.Code   = PTP_OC_OLYMPUS_OpenSession;
+	ptp.Nparam = 0;
+	*len	   = 0;
+	*data      = NULL;
+	ret=ptp_transaction_new(params, &ptp, PTP_DP_GETDATA, 0, &handler);
+	ptp_exit_recv_memory_handler (&handler, data, len);
+	return ret;
+}
+
+uint16_t
+ptp_olympus_getcameraid (PTPParams* params, unsigned char**data, unsigned long *len)
+{
+	uint16_t 	ret;
+	PTPContainer	ptp;
+	PTPDataHandler	handler;
+    
+	ptp_init_recv_memory_handler (&handler);
+	PTP_CNT_INIT(ptp);
+	ptp.Code   = PTP_OC_OLYMPUS_GetCameraID;
+	ptp.Nparam = 0;
+	*len	   = 0;
+	*data       = NULL;
+	ret=ptp_transaction_new(params, &ptp, PTP_DP_GETDATA, 0, &handler);
+	ptp_exit_recv_memory_handler (&handler, data, len);
 	return ret;
 }
 
@@ -489,27 +954,27 @@ ptp_generic_no_data (PTPParams* params, uint16_t code, unsigned int n_param, ...
 {
 	PTPContainer ptp;
 	va_list args;
-	int i;
-
+	unsigned int i;
+    
 	if( n_param > 5 )
 		return PTP_RC_InvalidParameter;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=code;
 	ptp.Nparam=n_param;
-
+    
 	va_start(args, n_param);
 	for( i=0; i<n_param; ++i )
 		(&ptp.Param1)[i] = va_arg(args, uint32_t);
 	va_end(args);
-
+    
 	return ptp_transaction(params, &ptp, PTP_DP_NODATA, 0, NULL, NULL);
 }
 
 /**
  * ptp_opensession:
  * params:	PTPParams*
- * 		session			- session number 
+ * 		session			- session number
  *
  * Establishes a new session.
  *
@@ -520,11 +985,11 @@ ptp_opensession (PTPParams* params, uint32_t session)
 {
 	uint16_t ret;
 	PTPContainer ptp;
-
+    
 	ptp_debug(params,"PTP: Opening session");
-
+    
 	/* SessonID field of the operation dataset should always
-	   be set to 0 for OpenSession request! */
+     be set to 0 for OpenSession request! */
 	params->session_id=0x00000000;
 	/* TransactionID should be set to 0 also! */
 	params->transaction_id=0x0000000;
@@ -533,7 +998,7 @@ ptp_opensession (PTPParams* params, uint32_t session)
 	params->response_packet_size = 0;
 	/* no split headers */
 	params->split_header_data = 0;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_OpenSession;
 	ptp.Param1=session;
@@ -543,6 +1008,89 @@ ptp_opensession (PTPParams* params, uint32_t session)
 	params->session_id=session;
 	return ret;
 }
+
+void
+ptp_free_devicepropvalue(uint16_t dt, PTPPropertyValue* dpd) {
+	switch (dt) {
+        case PTP_DTC_INT8:	case PTP_DTC_UINT8:
+        case PTP_DTC_UINT16:	case PTP_DTC_INT16:
+        case PTP_DTC_UINT32:	case PTP_DTC_INT32:
+        case PTP_DTC_UINT64:	case PTP_DTC_INT64:
+        case PTP_DTC_UINT128:	case PTP_DTC_INT128:
+            /* Nothing to free */
+            break;
+        case PTP_DTC_AINT8:	case PTP_DTC_AUINT8:
+        case PTP_DTC_AUINT16:	case PTP_DTC_AINT16:
+        case PTP_DTC_AUINT32:	case PTP_DTC_AINT32:
+        case PTP_DTC_AUINT64:	case PTP_DTC_AINT64:
+        case PTP_DTC_AUINT128:	case PTP_DTC_AINT128:
+            if (dpd->a.v)
+                free(dpd->a.v);
+            break;
+        case PTP_DTC_STR:
+            if (dpd->str)
+                free(dpd->str);
+            break;
+	}
+}
+
+void
+ptp_free_devicepropdesc(PTPDevicePropDesc* dpd)
+{
+	uint16_t i;
+    
+	ptp_free_devicepropvalue (dpd->DataType, &dpd->FactoryDefaultValue);
+	ptp_free_devicepropvalue (dpd->DataType, &dpd->CurrentValue);
+	switch (dpd->FormFlag) {
+        case PTP_DPFF_Range:
+            ptp_free_devicepropvalue (dpd->DataType, &dpd->FORM.Range.MinimumValue);
+            ptp_free_devicepropvalue (dpd->DataType, &dpd->FORM.Range.MaximumValue);
+            ptp_free_devicepropvalue (dpd->DataType, &dpd->FORM.Range.StepSize);
+            break;
+        case PTP_DPFF_Enumeration:
+            if (dpd->FORM.Enum.SupportedValue) {
+                for (i=0;i<dpd->FORM.Enum.NumberOfValues;i++)
+                    ptp_free_devicepropvalue (dpd->DataType, dpd->FORM.Enum.SupportedValue+i);
+                free (dpd->FORM.Enum.SupportedValue);
+            }
+	}
+}
+
+
+void
+ptp_free_objectpropdesc(PTPObjectPropDesc* opd)
+{
+	uint16_t i;
+    
+	ptp_free_devicepropvalue (opd->DataType, &opd->FactoryDefaultValue);
+	switch (opd->FormFlag) {
+        case PTP_OPFF_None:
+            break;
+        case PTP_OPFF_Range:
+            ptp_free_devicepropvalue (opd->DataType, &opd->FORM.Range.MinimumValue);
+            ptp_free_devicepropvalue (opd->DataType, &opd->FORM.Range.MaximumValue);
+            ptp_free_devicepropvalue (opd->DataType, &opd->FORM.Range.StepSize);
+            break;
+        case PTP_OPFF_Enumeration:
+            if (opd->FORM.Enum.SupportedValue) {
+                for (i=0;i<opd->FORM.Enum.NumberOfValues;i++)
+                    ptp_free_devicepropvalue (opd->DataType, opd->FORM.Enum.SupportedValue+i);
+                free (opd->FORM.Enum.SupportedValue);
+            }
+            break;
+        case PTP_OPFF_DateTime:
+        case PTP_OPFF_FixedLengthArray:
+        case PTP_OPFF_RegularExpression:
+        case PTP_OPFF_ByteArray:
+        case PTP_OPFF_LongString:
+            /* Ignore these presently, we cannot unpack them, so there is nothing to be freed. */
+            break;
+        default:
+            fprintf (stderr, "Unknown OPFF type %d\n", opd->FormFlag);
+            break;
+	}
+}
+
 
 /**
  * ptp_free_params:
@@ -554,8 +1102,8 @@ ptp_opensession (PTPParams* params, uint32_t session)
  **/
 void
 ptp_free_params (PTPParams *params) {
-	int i;
-
+	unsigned int i;
+    
 	if (params->cameraname) free (params->cameraname);
 	if (params->wifi_profiles) free (params->wifi_profiles);
 	for (i=0;i<params->nrofobjects;i++)
@@ -586,7 +1134,7 @@ ptp_getstorageids (PTPParams* params, PTPStorageIDs* storageids)
 	PTPContainer ptp;
 	unsigned int len;
 	unsigned char* sids=NULL;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_GetStorageIDs;
 	ptp.Nparam=0;
@@ -609,13 +1157,13 @@ ptp_getstorageids (PTPParams* params, PTPStorageIDs* storageids)
  **/
 uint16_t
 ptp_getstorageinfo (PTPParams* params, uint32_t storageid,
-			PTPStorageInfo* storageinfo)
+                    PTPStorageInfo* storageinfo)
 {
 	uint16_t ret;
 	PTPContainer ptp;
 	unsigned char* si=NULL;
 	unsigned int len;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_GetStorageInfo;
 	ptp.Param1=storageid;
@@ -643,14 +1191,14 @@ ptp_getstorageinfo (PTPParams* params, uint32_t storageid,
  **/
 uint16_t
 ptp_getobjecthandles (PTPParams* params, uint32_t storage,
-			uint32_t objectformatcode, uint32_t associationOH,
-			PTPObjectHandles* objecthandles)
+                      uint32_t objectformatcode, uint32_t associationOH,
+                      PTPObjectHandles* objecthandles)
 {
 	uint16_t ret;
 	PTPContainer ptp;
 	unsigned char* oh=NULL;
 	unsigned int len;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_GetObjectHandles;
 	ptp.Param1=storage;
@@ -665,7 +1213,7 @@ ptp_getobjecthandles (PTPParams* params, uint32_t storage,
 		if (	(storage == 0xffffffff) &&
 			(objectformatcode == 0) &&
 			(associationOH == 0)
-		) {
+            ) {
 			/* When we query all object handles on all stores and
 			 * get an error -> just handle it as "0 handles".
 			 */
@@ -680,13 +1228,13 @@ ptp_getobjecthandles (PTPParams* params, uint32_t storage,
 
 uint16_t
 ptp_getfilesystemmanifest (PTPParams* params, uint32_t storage,
-			uint32_t objectformatcode, uint32_t associationOH,
-			unsigned char** data)
+                           uint32_t objectformatcode, uint32_t associationOH,
+                           unsigned char** data)
 {
 	uint16_t ret;
 	PTPContainer ptp;
 	unsigned int len;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_GetFilesystemManifest;
 	ptp.Param1=storage;
@@ -714,12 +1262,12 @@ ptp_getfilesystemmanifest (PTPParams* params, uint32_t storage,
  **/
 uint16_t
 ptp_getnumobjects (PTPParams* params, uint32_t storage,
-			uint32_t objectformatcode, uint32_t associationOH,
-			uint32_t* numobs)
+                   uint32_t objectformatcode, uint32_t associationOH,
+                   uint32_t* numobs)
 {
 	uint16_t ret;
 	PTPContainer ptp;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_GetNumObjects;
 	ptp.Param1=storage;
@@ -749,7 +1297,7 @@ ptp_canon_eos_bulbstart (PTPParams* params)
 {
 	uint16_t ret;
 	PTPContainer ptp;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code   = PTP_OC_CANON_EOS_BulbStart;
 	ptp.Nparam = 0;
@@ -775,7 +1323,7 @@ ptp_canon_eos_capture (PTPParams* params, uint32_t *result)
 {
 	uint16_t ret;
 	PTPContainer ptp;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code   = PTP_OC_CANON_EOS_RemoteRelease;
 	ptp.Nparam = 0;
@@ -799,7 +1347,7 @@ ptp_canon_eos_bulbend (PTPParams* params)
 {
 	uint16_t ret;
 	PTPContainer ptp;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code   = PTP_OC_CANON_EOS_BulbEnd;
 	ptp.Nparam = 0;
@@ -821,13 +1369,13 @@ ptp_canon_eos_bulbend (PTPParams* params)
  **/
 uint16_t
 ptp_getobjectinfo (PTPParams* params, uint32_t handle,
-			PTPObjectInfo* objectinfo)
+                   PTPObjectInfo* objectinfo)
 {
 	uint16_t ret;
 	PTPContainer ptp;
 	unsigned char* oi=NULL;
 	unsigned int len;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_GetObjectInfo;
 	ptp.Param1=handle;
@@ -855,7 +1403,7 @@ ptp_getobject (PTPParams* params, uint32_t handle, unsigned char** object)
 {
 	PTPContainer ptp;
 	unsigned int len;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_GetObject;
 	ptp.Param1=handle;
@@ -879,7 +1427,7 @@ uint16_t
 ptp_getobject_to_handler (PTPParams* params, uint32_t handle, PTPDataHandler *handler)
 {
 	PTPContainer ptp;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_GetObject;
 	ptp.Param1=handle;
@@ -893,7 +1441,7 @@ ptp_getobject_to_handler (PTPParams* params, uint32_t handle, PTPDataHandler *ha
  *		handle			- Object handle
  *		fd                      - File descriptor to write() to
  *
- * Get object 'handle' from device and write the data to the 
+ * Get object 'handle' from device and write the data to the
  * given file descriptor.
  *
  * Return values: Some PTP_RC_* code.
@@ -904,7 +1452,7 @@ ptp_getobject_tofd (PTPParams* params, uint32_t handle, int fd)
 	PTPContainer	ptp;
 	PTPDataHandler	handler;
 	uint16_t	ret;
-
+    
 	ptp_init_fd_handler (&handler, fd);
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_GetObject;
@@ -931,11 +1479,11 @@ ptp_getobject_tofd (PTPParams* params, uint32_t handle, int fd)
  **/
 uint16_t
 ptp_getpartialobject (PTPParams* params, uint32_t handle, uint32_t offset,
-			uint32_t maxbytes, unsigned char** object,
-			uint32_t *len)
+                      uint32_t maxbytes, unsigned char** object,
+                      uint32_t *len)
 {
 	PTPContainer ptp;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_GetPartialObject;
 	ptp.Param1=handle;
@@ -961,7 +1509,7 @@ uint16_t
 ptp_getthumb (PTPParams* params, uint32_t handle, unsigned char** object, unsigned int *len)
 {
 	PTPContainer ptp;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_GetThumb;
 	ptp.Param1=handle;
@@ -975,7 +1523,7 @@ ptp_getthumb (PTPParams* params, uint32_t handle, unsigned char** object, unsign
  * params:	PTPParams*
  *		handle			- object handle
  *		ofc			- object format code (optional)
- * 
+ *
  * Deletes desired objects.
  *
  * Return values: Some PTP_RC_* code.
@@ -985,7 +1533,7 @@ ptp_deleteobject (PTPParams* params, uint32_t handle, uint32_t ofc)
 {
 	PTPContainer ptp;
 	uint16_t ret;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_DeleteObject;
 	ptp.Param1=handle;
@@ -1007,7 +1555,7 @@ ptp_deleteobject (PTPParams* params, uint32_t handle, uint32_t ofc)
  *		uint32_t* parenthandle 	- Parent ObjectHandle on responder
  * 		uint32_t* handle	- see Return values
  *		PTPObjectInfo* objectinfo- ObjectInfo that is to be sent
- * 
+ *
  * Sends ObjectInfo of file that is to be sent via SendFileObject.
  *
  * Return values: Some PTP_RC_* code.
@@ -1019,15 +1567,15 @@ ptp_deleteobject (PTPParams* params, uint32_t handle, uint32_t ofc)
  *					  for the incoming object
  **/
 uint16_t
-ptp_sendobjectinfo (PTPParams* params, uint32_t* store, 
-			uint32_t* parenthandle, uint32_t* handle,
-			PTPObjectInfo* objectinfo)
+ptp_sendobjectinfo (PTPParams* params, uint32_t* store,
+                    uint32_t* parenthandle, uint32_t* handle,
+                    PTPObjectInfo* objectinfo)
 {
 	uint16_t ret;
 	PTPContainer ptp;
 	unsigned char* oidata=NULL;
 	uint32_t size;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_SendObjectInfo;
 	ptp.Param1=*store;
@@ -1035,11 +1583,11 @@ ptp_sendobjectinfo (PTPParams* params, uint32_t* store,
 	ptp.Nparam=2;
 	
 	size=ptp_pack_OI(params, objectinfo, &oidata);
-	ret = ptp_transaction(params, &ptp, PTP_DP_SENDDATA, size, &oidata, NULL); 
+	ret = ptp_transaction(params, &ptp, PTP_DP_SENDDATA, size, &oidata, NULL);
 	free(oidata);
 	*store=ptp.Param1;
 	*parenthandle=ptp.Param2;
-	*handle=ptp.Param3; 
+	*handle=ptp.Param3;
 	return ret;
 }
 
@@ -1047,22 +1595,22 @@ ptp_sendobjectinfo (PTPParams* params, uint32_t* store,
  * ptp_sendobject:
  * params:	PTPParams*
  *		char*	object		- contains the object that is to be sent
- *		uint32_t size		- object size
- *		
+ *		uint64_t size		- object size
+ *
  * Sends object to Responder.
  *
  * Return values: Some PTP_RC_* code.
  *
  */
 uint16_t
-ptp_sendobject (PTPParams* params, unsigned char* object, uint32_t size)
+ptp_sendobject (PTPParams* params, unsigned char* object, uint64_t size)
 {
 	PTPContainer ptp;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_SendObject;
 	ptp.Nparam=0;
-
+    
 	return ptp_transaction(params, &ptp, PTP_DP_SENDDATA, size, &object, NULL);
 }
 
@@ -1070,7 +1618,7 @@ ptp_sendobject (PTPParams* params, unsigned char* object, uint32_t size)
  * ptp_sendobject_from_handler:
  * params:	PTPParams*
  *		PTPDataHandler*         - File descriptor to read() object from
- *              uint32_t size           - File/object size
+ *              uint64_t size           - File/object size
  *
  * Sends object from file descriptor by consecutive reads from this
  * descriptor.
@@ -1078,10 +1626,10 @@ ptp_sendobject (PTPParams* params, unsigned char* object, uint32_t size)
  * Return values: Some PTP_RC_* code.
  **/
 uint16_t
-ptp_sendobject_from_handler (PTPParams* params, PTPDataHandler *handler, uint32_t size)
+ptp_sendobject_from_handler (PTPParams* params, PTPDataHandler *handler, uint64_t size)
 {
 	PTPContainer	ptp;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_SendObject;
 	ptp.Nparam=0;
@@ -1093,7 +1641,7 @@ ptp_sendobject_from_handler (PTPParams* params, PTPDataHandler *handler, uint32_
  * ptp_sendobject_fromfd:
  * params:	PTPParams*
  *		fd                      - File descriptor to read() object from
- *              uint32_t size           - File/object size
+ *              uint64_t size           - File/object size
  *
  * Sends object from file descriptor by consecutive reads from this
  * descriptor.
@@ -1101,12 +1649,12 @@ ptp_sendobject_from_handler (PTPParams* params, PTPDataHandler *handler, uint32_
  * Return values: Some PTP_RC_* code.
  **/
 uint16_t
-ptp_sendobject_fromfd (PTPParams* params, int fd, uint32_t size)
+ptp_sendobject_fromfd (PTPParams* params, int fd, uint64_t size)
 {
 	PTPContainer	ptp;
 	PTPDataHandler	handler;
 	uint16_t	ret;
-
+    
 	ptp_init_fd_handler (&handler, fd);
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_SendObject;
@@ -1116,23 +1664,54 @@ ptp_sendobject_fromfd (PTPParams* params, int fd, uint32_t size)
 	return ret;
 }
 
+#define PROPCACHE_TIMEOUT 5	/* seconds */
 
 uint16_t
-ptp_getdevicepropdesc (PTPParams* params, uint16_t propcode, 
-			PTPDevicePropDesc* devicepropertydesc)
+ptp_getdevicepropdesc (PTPParams* params, uint16_t propcode,
+                       PTPDevicePropDesc* devicepropertydesc)
 {
 	PTPContainer ptp;
 	uint16_t ret;
 	unsigned int len;
 	unsigned char* dpd=NULL;
-
+    
+    
 	PTP_CNT_INIT(ptp);
-	ptp.Code=PTP_OC_GetDevicePropDesc;
-	ptp.Param1=propcode;
-	ptp.Nparam=1;
-	len=0;
+	ptp.Code   = PTP_OC_GetDevicePropDesc;
+	ptp.Param1 = propcode;
+	ptp.Nparam = 1;
+	len        = 0;
 	ret=ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, &dpd, &len);
-	if (ret == PTP_RC_OK) ptp_unpack_DPD(params, dpd, devicepropertydesc, len);
+    
+	if (ret == PTP_RC_OK) {
+		if (params->device_flags & DEVICE_FLAG_OLYMPUS_XML_WRAPPED) {
+#ifdef HAVE_LIBXML2
+			xmlNodePtr	code;
+            
+			ret = ptp_olympus_parse_output_xml (params,(char*)dpd,len,&code);
+			if (ret == PTP_RC_OK) {
+				int x;
+                
+				if (	(xmlChildElementCount(code) == 1) &&
+					(!strcmp((char*)code->name,"c1014"))
+                    ) {
+					code = xmlFirstElementChild (code);
+                    
+					if (	(sscanf((char*)code->name,"p%x", &x)) &&
+						(x == propcode)
+                        ) {
+						ret = parse_9301_propdesc (params, xmlFirstElementChild (code), devicepropertydesc);
+						xmlFreeDoc(code->doc);
+					}
+				}
+			} else {
+				ptp_debug(params,"failed to parse output xml, ret %x?", ret);
+			}
+#endif
+		} else {
+			ptp_unpack_DPD(params, dpd, devicepropertydesc, len);
+		}
+	}
 	free(dpd);
 	return ret;
 }
@@ -1140,15 +1719,14 @@ ptp_getdevicepropdesc (PTPParams* params, uint16_t propcode,
 
 uint16_t
 ptp_getdevicepropvalue (PTPParams* params, uint16_t propcode,
-			PTPPropertyValue* value, uint16_t datatype)
+                        PTPPropertyValue* value, uint16_t datatype)
 {
 	PTPContainer ptp;
 	uint16_t ret;
-	unsigned int len;
-	int offset;
+	unsigned int len, offset;
 	unsigned char* dpv=NULL;
-
-
+    
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_GetDevicePropValue;
 	ptp.Param1=propcode;
@@ -1162,13 +1740,13 @@ ptp_getdevicepropvalue (PTPParams* params, uint16_t propcode,
 
 uint16_t
 ptp_setdevicepropvalue (PTPParams* params, uint16_t propcode,
-			PTPPropertyValue *value, uint16_t datatype)
+                        PTPPropertyValue *value, uint16_t datatype)
 {
 	PTPContainer ptp;
 	uint16_t ret;
 	uint32_t size;
 	unsigned char* dpv=NULL;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_SetDevicePropValue;
 	ptp.Param1=propcode;
@@ -1186,7 +1764,7 @@ ptp_setdevicepropvalue (PTPParams* params, uint16_t propcode,
  *		uint32_t* parenthandle 	- Parent ObjectHandle on responder
  * 		uint32_t* handle	- see Return values
  *		PTPObjectInfo* objectinfo- ObjectInfo that is to be sent
- * 
+ *
  * Sends ObjectInfo of file that is to be sent via SendFileObject.
  *
  * Return values: Some PTP_RC_* code.
@@ -1198,15 +1776,15 @@ ptp_setdevicepropvalue (PTPParams* params, uint16_t propcode,
  *					  for the incoming object
  **/
 uint16_t
-ptp_ek_sendfileobjectinfo (PTPParams* params, uint32_t* store, 
-			uint32_t* parenthandle, uint32_t* handle,
-			PTPObjectInfo* objectinfo)
+ptp_ek_sendfileobjectinfo (PTPParams* params, uint32_t* store,
+                           uint32_t* parenthandle, uint32_t* handle,
+                           PTPObjectInfo* objectinfo)
 {
 	uint16_t ret;
 	PTPContainer ptp;
 	unsigned char* oidata=NULL;
 	uint32_t size;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_EK_SendFileObjectInfo;
 	ptp.Param1=*store;
@@ -1214,11 +1792,11 @@ ptp_ek_sendfileobjectinfo (PTPParams* params, uint32_t* store,
 	ptp.Nparam=2;
 	
 	size=ptp_pack_OI(params, objectinfo, &oidata);
-	ret=ptp_transaction(params, &ptp, PTP_DP_SENDDATA, size, &oidata, NULL); 
+	ret=ptp_transaction(params, &ptp, PTP_DP_SENDDATA, size, &oidata, NULL);
 	free(oidata);
 	*store=ptp.Param1;
 	*parenthandle=ptp.Param2;
-	*handle=ptp.Param3; 
+	*handle=ptp.Param3;
 	return ret;
 }
 
@@ -1227,7 +1805,7 @@ ptp_ek_sendfileobjectinfo (PTPParams* params, uint32_t* store,
  * params:	PTPParams*
  *		char**	serial		- contains the serial number of the camera
  *		uint32_t* size		- contains the string length
- *		
+ *
  * Gets the serial number from the device. (ptp serial)
  *
  * Return values: Some PTP_RC_* code.
@@ -1237,11 +1815,11 @@ uint16_t
 ptp_ek_getserial (PTPParams* params, unsigned char **data, unsigned int *size)
 {
 	PTPContainer ptp;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code   = PTP_OC_EK_GetSerial;
 	ptp.Nparam = 0;
-	return ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, data, size); 
+	return ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, data, size);
 }
 
 /**
@@ -1249,7 +1827,7 @@ ptp_ek_getserial (PTPParams* params, unsigned char **data, unsigned int *size)
  * params:	PTPParams*
  *		char*	serial		- contains the new serial number
  *		uint32_t size		- string length
- *		
+ *
  * Sets the serial number of the device. (ptp serial)
  *
  * Return values: Some PTP_RC_* code.
@@ -1259,11 +1837,11 @@ uint16_t
 ptp_ek_setserial (PTPParams* params, unsigned char *data, unsigned int size)
 {
 	PTPContainer ptp;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code   = PTP_OC_EK_SetSerial;
 	ptp.Nparam = 0;
-	return ptp_transaction(params, &ptp, PTP_DP_SENDDATA, size, &data, NULL); 
+	return ptp_transaction(params, &ptp, PTP_DP_SENDDATA, size, &data, NULL);
 }
 
 /* unclear what it does yet */
@@ -1271,11 +1849,11 @@ uint16_t
 ptp_ek_9007 (PTPParams* params, unsigned char **data, unsigned int *size)
 {
 	PTPContainer ptp;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code   = 0x9007;
 	ptp.Nparam = 0;
-	return ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, data, size); 
+	return ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, data, size);
 }
 
 /* unclear what it does yet */
@@ -1284,11 +1862,11 @@ ptp_ek_9009 (PTPParams* params, uint32_t *p1, uint32_t *p2)
 {
 	PTPContainer	ptp;
 	uint16_t	ret;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code   = 0x9009;
 	ptp.Nparam = 0;
-	ret = ptp_transaction(params, &ptp, PTP_DP_NODATA, 0, NULL, NULL); 
+	ret = ptp_transaction(params, &ptp, PTP_DP_NODATA, 0, NULL, NULL);
 	*p1 = ptp.Param1;
 	*p2 = ptp.Param2;
 	return ret;
@@ -1299,11 +1877,11 @@ uint16_t
 ptp_ek_900c (PTPParams* params, unsigned char **data, unsigned int *size)
 {
 	PTPContainer ptp;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code   = 0x900c;
 	ptp.Nparam = 0;
-	return ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, data, size); 
+	return ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, data, size);
 	/* returned data is 16bit,16bit,32bit,32bit */
 }
 
@@ -1311,7 +1889,7 @@ ptp_ek_900c (PTPParams* params, unsigned char **data, unsigned int *size)
  * ptp_ek_settext:
  * params:	PTPParams*
  *		PTPEKTextParams*	- contains the texts to display.
- *		
+ *
  * Displays the specified texts on the TFT of the camera.
  *
  * Return values: Some PTP_RC_* code.
@@ -1324,13 +1902,13 @@ ptp_ek_settext (PTPParams* params, PTPEKTextParams *text)
 	uint16_t ret;
 	unsigned int size;
 	unsigned char *data;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code   = PTP_OC_EK_SetText;
 	ptp.Nparam = 0;
 	if (0 == (size = ptp_pack_EK_text(params, text, &data)))
 		return PTP_ERROR_BADPARAM;
-	ret = ptp_transaction(params, &ptp, PTP_DP_SENDDATA, size, &data, NULL); 
+	ret = ptp_transaction(params, &ptp, PTP_DP_SENDDATA, size, &data, NULL);
 	free(data);
 	return ret;
 }
@@ -1340,7 +1918,7 @@ ptp_ek_settext (PTPParams* params, PTPEKTextParams *text)
  * params:	PTPParams*
  *		char*	object		- contains the object that is to be sent
  *		uint32_t size		- object size
- *		
+ *
  * Sends object to Responder.
  *
  * Return values: Some PTP_RC_* code.
@@ -1350,11 +1928,11 @@ uint16_t
 ptp_ek_sendfileobject (PTPParams* params, unsigned char* object, uint32_t size)
 {
 	PTPContainer ptp;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_EK_SendFileObject;
 	ptp.Nparam=0;
-
+    
 	return ptp_transaction(params, &ptp, PTP_DP_SENDDATA, size, &object, NULL);
 }
 
@@ -1363,7 +1941,7 @@ ptp_ek_sendfileobject (PTPParams* params, unsigned char* object, uint32_t size)
  * params:	PTPParams*
  *		PTPDataHandler*	handler	- contains the handler of the object that is to be sent
  *		uint32_t size		- object size
- *		
+ *
  * Sends object to Responder.
  *
  * Return values: Some PTP_RC_* code.
@@ -1373,7 +1951,7 @@ uint16_t
 ptp_ek_sendfileobject_from_handler (PTPParams* params, PTPDataHandler*handler, uint32_t size)
 {
 	PTPContainer ptp;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_EK_SendFileObject;
 	ptp.Nparam=0;
@@ -1396,7 +1974,7 @@ ptp_ek_sendfileobject_from_handler (PTPParams* params, PTPDataHandler*handler, u
  *		uint32_t p2 		- Not fully understood parameter
  *					  0 - returns full size
  *					  1 - returns thumbnail size (or EXIF?)
- * 
+ *
  * Gets form the responder the size of the specified object.
  *
  * Return values: Some PTP_RC_* code.
@@ -1407,8 +1985,8 @@ ptp_ek_sendfileobject_from_handler (PTPParams* params, PTPDataHandler*handler, u
  *
  **/
 uint16_t
-ptp_canon_getpartialobjectinfo (PTPParams* params, uint32_t handle, uint32_t p2, 
-			uint32_t* size, uint32_t* rp2) 
+ptp_canon_getpartialobjectinfo (PTPParams* params, uint32_t handle, uint32_t p2,
+                                uint32_t* size, uint32_t* rp2)
 {
 	uint16_t ret;
 	PTPContainer ptp;
@@ -1439,7 +2017,7 @@ ptp_canon_get_mac_address (PTPParams* params, unsigned char **mac)
 {
 	PTPContainer ptp;
 	unsigned int size = 0;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_CANON_GetMACAddress;
 	ptp.Nparam=0;
@@ -1450,7 +2028,7 @@ ptp_canon_get_mac_address (PTPParams* params, unsigned char **mac)
 /**
  * ptp_canon_get_directory:
  * params:	PTPParams*
-
+ 
  * Gets the full directory of the camera.
  *
  * Return values: Some PTP_RC_* code.
@@ -1461,15 +2039,15 @@ ptp_canon_get_mac_address (PTPParams* params, unsigned char **mac)
  **/
 uint16_t
 ptp_canon_get_directory (PTPParams* params,
-	PTPObjectHandles	*handles,
-	PTPObjectInfo		**oinfos,	/* size(handles->n) */
-	uint32_t		**flags		/* size(handles->n) */
+                         PTPObjectHandles	*handles,
+                         PTPObjectInfo		**oinfos,	/* size(handles->n) */
+                         uint32_t		**flags		/* size(handles->n) */
 ) {
 	PTPContainer	ptp;
 	unsigned char	*dir = NULL;
 	unsigned int	size = 0;
 	uint16_t	ret;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_CANON_GetDirectory;
 	ptp.Nparam=0;
@@ -1485,9 +2063,9 @@ ptp_canon_get_directory (PTPParams* params,
  * ptp_canon_gettreeinfo:
  * params:	PTPParams*
  *              uint32_t *out
- * 
+ *
  * Switches the camera display to on and lets the user
- * select what to transfer. Sends a 0xc011 event when started 
+ * select what to transfer. Sends a 0xc011 event when started
  * and 0xc013 if direct transfer aborted.
  *
  * Return values: Some PTP_RC_* code.
@@ -1498,7 +2076,7 @@ ptp_canon_gettreeinfo (PTPParams* params, uint32_t *out)
 {
 	PTPContainer ptp;
 	uint16_t ret;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code   = PTP_OC_CANON_GetTreeInfo;
 	ptp.Nparam = 1;
@@ -1513,7 +2091,7 @@ ptp_canon_gettreeinfo (PTPParams* params, uint32_t *out)
  * ptp_canon_getpairinginfo:
  * params:	PTPParams*
  *              int nr
- * 
+ *
  * Get the pairing information.
  *
  * Return values: Some PTP_RC_* code.
@@ -1542,7 +2120,7 @@ ptp_canon_getpairinginfo (PTPParams* params, uint32_t nr, unsigned char **data, 
  * params:	PTPParams*
  *              PTPCanon_directtransfer_entry **out
  *              unsigned int *outsize
- * 
+ *
  * Retrieves direct transfer entries specifying the images to transfer
  * from the camera (to be retrieved after 0xc011 event).
  *
@@ -1551,14 +2129,13 @@ ptp_canon_getpairinginfo (PTPParams* params, uint32_t nr, unsigned char **data, 
  **/
 uint16_t
 ptp_canon_gettreesize (PTPParams* params,
-	PTPCanon_directtransfer_entry **entries, unsigned int *cnt)
+                       PTPCanon_directtransfer_entry **entries, unsigned int *cnt)
 {
 	PTPContainer ptp;
 	uint16_t ret;
 	unsigned char *out = NULL, *cur;
-	int i;
-	unsigned int size;
-	
+	unsigned int i, size;
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code   = PTP_OC_CANON_GetTreeSize;
 	ptp.Nparam = 0;
@@ -1585,7 +2162,7 @@ ptp_canon_gettreesize (PTPParams* params,
 /**
  * ptp_canon_checkevent:
  * params:	PTPParams*
- * 
+ *
  * The camera has a FIFO stack, in which it accumulates events.
  * Partially these events are communicated also via the USB interrupt pipe
  * according to the PTP USB specification, partially not.
@@ -1593,7 +2170,7 @@ ptp_canon_gettreesize (PTPParams* params,
  * if the event stack is empty, or filled with an event's data otherwise.
  * The event is removed from the stack in the latter case.
  * The Remote Capture app sends this command to the camera all the time
- * of connection, filling with it the gaps between other operations. 
+ * of connection, filling with it the gaps between other operations.
  *
  * Return values: Some PTP_RC_* code.
  * Upon success : PTPUSBEventContainer* event	- is filled with the event data
@@ -1617,29 +2194,40 @@ ptp_canon_checkevent (PTPParams* params, PTPContainer* event, int* isevent)
 	ret=ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, &evdata, &len);
 	if (evdata!=NULL) {
 		if (ret == PTP_RC_OK) {
-        		ptp_unpack_EC(params, evdata, event, len);
-    			*isevent=1;
-        	}
+            ptp_unpack_EC(params, evdata, event, len);
+            *isevent=1;
+        }
 		free(evdata);
 	}
 	return ret;
 }
 
 uint16_t
+ptp_add_event (PTPParams *params, PTPContainer *evt) {
+	if (params->nrofevents)
+		params->events = realloc(params->events, sizeof(PTPContainer)*(params->nrofevents+1));
+	else
+		params->events = malloc(sizeof(PTPContainer)*1);
+	memcpy (&params->events[params->nrofevents],evt,1*sizeof(PTPContainer));
+	params->nrofevents += 1;
+	return PTP_RC_OK;
+}
+
+uint16_t
 ptp_check_event (PTPParams *params) {
 	PTPContainer		event;
 	uint16_t		ret;
-
+    
 	if (	(params->deviceinfo.VendorExtensionID == PTP_VENDOR_NIKON) &&
 		ptp_operation_issupported(params, PTP_OC_NIKON_CheckEvent)
-	) {
-		int evtcnt;
+        ) {
+		unsigned int evtcnt;
 		PTPContainer	*xevent = NULL;
-
+        
 		ret = ptp_nikon_check_event(params, &xevent, &evtcnt);
 		if (ret != PTP_RC_OK)
 			return ret;
-
+        
 		if (evtcnt) {
 			if (params->nrofevents)
 				params->events = realloc(params->events, sizeof(PTPContainer)*(evtcnt+params->nrofevents));
@@ -1654,15 +2242,15 @@ ptp_check_event (PTPParams *params) {
 	/* should not get here ... EOS has no normal PTP events and another queue handling. */
 	if (	(params->deviceinfo.VendorExtensionID == PTP_VENDOR_CANON) &&
 		ptp_operation_issupported(params, PTP_OC_CANON_EOS_GetEvent)
-	) {
+        ) {
 		return PTP_RC_OK;
 	}
-
+    
 	if (	(params->deviceinfo.VendorExtensionID == PTP_VENDOR_CANON) &&
 		ptp_operation_issupported(params, PTP_OC_CANON_CheckEvent)
-	) {
+        ) {
 		int isevent;
-
+        
 		ret = ptp_canon_checkevent (params,&event,&isevent);
 		if (ret!=PTP_RC_OK)
 			return ret;
@@ -1671,7 +2259,7 @@ ptp_check_event (PTPParams *params) {
 		/* Event Emulate Mode 0 (unset) and 1-5 get interrupt events. 6-7 does not. */
 		if (params->canon_event_mode > 5)
 			return ret;
-
+        
 		/* FIXME: fallthrough or return? */
 #ifdef __APPLE__
 		/* the libusb 1 on darwin currently does not like polling
@@ -1682,16 +2270,11 @@ ptp_check_event (PTPParams *params) {
 #endif
 	}
 	ret = params->event_check(params,&event);
-
+    
 store_event:
 	if (ret == PTP_RC_OK) {
 		ptp_debug (params, "event: nparams=0x%X, code=0x%X, trans_id=0x%X, p1=0x%X, p2=0x%X, p3=0x%X", event.Nparam,event.Code,event.Transaction_ID, event.Param1, event.Param2, event.Param3);
-		if (params->nrofevents)
-			params->events = realloc(params->events, sizeof(PTPContainer)*(params->nrofevents+1));
-		else
-			params->events = malloc(sizeof(PTPContainer)*1);
-		memcpy (&params->events[params->nrofevents],&event,1*sizeof(PTPContainer));
-		params->nrofevents += 1;
+		ptp_add_event (params, &event);
 	}
 	if (ret == PTP_ERROR_TIMEOUT) /* ok, just new events */
 		ret = PTP_RC_OK;
@@ -1715,7 +2298,7 @@ ptp_get_one_event(PTPParams *params, PTPContainer *event) {
 
 /**
  * ptp_canon_eos_getevent:
- * 
+ *
  * This retrieves configuration status/updates/changes
  * on EOS cameras. It reads a datablock which has a list of variable
  * sized structures.
@@ -1732,7 +2315,7 @@ ptp_canon_eos_getevent (PTPParams* params, PTPCanon_changes_entry **entries, int
 	uint16_t	ret;
 	unsigned int 	size = 0;
 	unsigned char	*data = NULL;
-
+    
 	*nrofentries = 0;
 	*entries = NULL;
 	PTP_CNT_INIT(ptp);
@@ -1740,7 +2323,7 @@ ptp_canon_eos_getevent (PTPParams* params, PTPCanon_changes_entry **entries, int
 	ptp.Nparam = 0;
 	ret = ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, &data, &size);
 	if (ret != PTP_RC_OK) return ret;
-        *nrofentries = ptp_unpack_CANON_changes(params,data,size,entries);
+    *nrofentries = ptp_unpack_CANON_changes(params,data,size,entries);
 	free (data);
 	return PTP_RC_OK;
 }
@@ -1750,14 +2333,14 @@ ptp_check_eos_events (PTPParams *params) {
 	uint16_t		ret;
 	PTPCanon_changes_entry	*entries = NULL, *nentries;
 	int			nrofentries = 0;
-
+    
 	while (1) { /* call it repeatedly until the camera does not report any */
 		ret = ptp_canon_eos_getevent (params, &entries, &nrofentries);
 		if (ret != PTP_RC_OK)
 			return ret;
 		if (!nrofentries)
 			return PTP_RC_OK;
-
+        
 		if (params->nrofbacklogentries) {
 			nentries = realloc(params->backlogentries,sizeof(entries[0])*(params->nrofbacklogentries+nrofentries));
 			if (!nentries)
@@ -1793,10 +2376,10 @@ ptp_get_one_eos_event (PTPParams *params, PTPCanon_changes_entry *entry) {
 
 uint16_t
 ptp_canon_eos_getdevicepropdesc (PTPParams* params, uint16_t propcode,
-	PTPDevicePropDesc *dpd)
+                                 PTPDevicePropDesc *dpd)
 {
-	int i;
-
+	unsigned int i;
+    
 	for (i=0;i<params->nrofcanon_props;i++)
 		if (params->canon_props[i].proptype == propcode)
 			break;
@@ -1807,15 +2390,15 @@ ptp_canon_eos_getdevicepropdesc (PTPParams* params, uint16_t propcode,
 		/* need to duplicate the Enumeration alloc */
 		dpd->FORM.Enum.SupportedValue = malloc (sizeof (PTPPropertyValue)*dpd->FORM.Enum.NumberOfValues);
 		memcpy (dpd->FORM.Enum.SupportedValue,
-			params->canon_props[i].dpd.FORM.Enum.SupportedValue,
-			sizeof (PTPPropertyValue)*dpd->FORM.Enum.NumberOfValues
-		);
+                params->canon_props[i].dpd.FORM.Enum.SupportedValue,
+                sizeof (PTPPropertyValue)*dpd->FORM.Enum.NumberOfValues
+                );
 	}
 	if (dpd->DataType == PTP_DTC_STR) {
 		dpd->FactoryDefaultValue.str = strdup( params->canon_props[i].dpd.FactoryDefaultValue.str );
 		dpd->CurrentValue.str = strdup( params->canon_props[i].dpd.CurrentValue.str );
 	}
-
+    
 	return PTP_RC_OK;
 }
 
@@ -1856,14 +2439,14 @@ ptp_canon_eos_getstorageinfo (PTPParams* params, uint32_t p1, unsigned char **da
 
 uint16_t
 ptp_canon_eos_getobjectinfoex (
-	PTPParams* params, uint32_t storageid, uint32_t oid, uint32_t unk,
-	PTPCANONFolderEntry **entries, unsigned int *nrofentries
-) {
+                               PTPParams* params, uint32_t storageid, uint32_t oid, uint32_t unk,
+                               PTPCANONFolderEntry **entries, unsigned int *nrofentries
+                               ) {
 	PTPContainer	ptp;
 	unsigned int	i, size = 0;
 	unsigned char	*data, *xdata;
 	uint16_t	ret;
-
+    
 	data = NULL;
 	PTP_CNT_INIT(ptp);
 	ptp.Code 	= PTP_OC_CANON_EOS_GetObjectInfoEx;
@@ -1874,12 +2457,17 @@ ptp_canon_eos_getobjectinfoex (
 	ret = ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, &data, &size);
 	if (ret != PTP_RC_OK)
 		return ret;
-
+    
+	if (!data) {
+		*nrofentries = 0;
+		return PTP_RC_OK;
+	}
+    
 	*nrofentries = dtoh32a(data);
 	*entries = malloc(*nrofentries * sizeof(PTPCANONFolderEntry));
 	if (!*entries)
 		return PTP_RC_GeneralError;
-
+    
 	xdata = data+sizeof(uint32_t);
 	for (i=0;i<*nrofentries;i++) {
 		ptp_unpack_Canon_EOS_FE (params, &xdata[4], &((*entries)[i]));
@@ -1890,14 +2478,14 @@ ptp_canon_eos_getobjectinfoex (
 
 /**
  * ptp_canon_eos_getpartialobject:
- * 
+ *
  * This retrieves a part of an PTP object which you specify as object id.
  * The id originates from 0x9116 call.
  * After finishing it, we seem to need to call ptp_canon_eos_enddirecttransfer.
  *
  * params:	PTPParams*
  * 		oid		Object ID
- * 		offset		The offset where to start the data transfer 
+ * 		offset		The offset where to start the data transfer
  *		xsize		Size in bytes of the transfer to do
  *		data		Pointer that receives the malloc()ed memory of the transfer.
  *
@@ -1909,7 +2497,7 @@ ptp_canon_eos_getpartialobject (PTPParams* params, uint32_t oid, uint32_t offset
 {
 	PTPContainer	ptp;
 	unsigned int	size = 0;
-
+    
 	*data = NULL;
 	PTP_CNT_INIT(ptp);
 	ptp.Code 	= PTP_OC_CANON_EOS_GetPartialObject;
@@ -1924,7 +2512,7 @@ uint16_t
 ptp_canon_eos_setdevicepropvalueex (PTPParams* params, unsigned char* data, unsigned int size)
 {
 	PTPContainer	ptp;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code 	= PTP_OC_CANON_EOS_SetDevicePropValueEx;
 	ptp.Nparam	= 0;
@@ -1933,14 +2521,13 @@ ptp_canon_eos_setdevicepropvalueex (PTPParams* params, unsigned char* data, unsi
 
 uint16_t
 ptp_canon_eos_setdevicepropvalue (PTPParams* params,
-	uint16_t propcode, PTPPropertyValue *value, uint16_t datatype
-) {
+                                  uint16_t propcode, PTPPropertyValue *value, uint16_t datatype
+                                  ) {
 	PTPContainer	ptp;
 	uint16_t	ret;
-	int 		i;
+	unsigned int	i, size;
 	unsigned char	*data;
-	unsigned int	size;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code 	= PTP_OC_CANON_EOS_SetDevicePropValueEx;
 	ptp.Nparam	= 0;
@@ -1949,68 +2536,68 @@ ptp_canon_eos_setdevicepropvalue (PTPParams* params,
 			break;
 	if (params->nrofcanon_props == i)
 		return PTP_RC_Undefined;
-
+    
 	switch (propcode) {
-	case PTP_DPC_CANON_EOS_ImageFormat:
-	case PTP_DPC_CANON_EOS_ImageFormatCF:
-	case PTP_DPC_CANON_EOS_ImageFormatSD:
-	case PTP_DPC_CANON_EOS_ImageFormatExtHD:
-		/* special handling of ImageFormat properties */
-		size = 8 + ptp_pack_EOS_ImageFormat( params, NULL, value->u16 );
-		data = malloc( size );
-		if (!data) return PTP_RC_GeneralError;
-		params->canon_props[i].dpd.CurrentValue.u16 = value->u16;
-		ptp_pack_EOS_ImageFormat( params, data + 8, value->u16 );
-		break;
-	case PTP_DPC_CANON_EOS_CustomFuncEx:
-		/* special handling of CustomFuncEx properties */
-		ptp_debug (params, "ptp2/ptp_canon_eos_setdevicepropvalue: setting EOS prop %x to %s",propcode,value->str);
-		size = 8 + ptp_pack_EOS_CustomFuncEx( params, NULL, value->str );
-		data = malloc( size );
-		if (!data) return PTP_RC_GeneralError;
-		params->canon_props[i].dpd.CurrentValue.str = strdup( value->str );
-		ptp_pack_EOS_CustomFuncEx( params, data + 8, value->str );
-		break;
-	default:
-		if (datatype != PTP_DTC_STR) {
-			data = calloc(sizeof(uint32_t),3);
-			if (!data) return PTP_RC_GeneralError;
-			size = sizeof(uint32_t)*3;
-		} else {
-			size = strlen(value->str) + 1 + 8;
-			data = calloc(sizeof(char),size);
-			if (!data) return PTP_RC_GeneralError;
-		}
-		switch (datatype) {
-		case PTP_DTC_INT8:
-		case PTP_DTC_UINT8:
-			/*fprintf (stderr, "%x -> %d\n", propcode, value->u8);*/
-			htod8a(&data[8], value->u8);
-			params->canon_props[i].dpd.CurrentValue.u8 = value->u8;
-			break;
-		case PTP_DTC_UINT16:
-		case PTP_DTC_INT16:
-			/*fprintf (stderr, "%x -> %d\n", propcode, value->u16);*/
-			htod16a(&data[8], value->u16);
-			params->canon_props[i].dpd.CurrentValue.u16 = value->u16;
-			break;
-		case PTP_DTC_INT32:
-		case PTP_DTC_UINT32:
-			/*fprintf (stderr, "%x -> %d\n", propcode, value->u32);*/
-			htod32a(&data[8], value->u32);
-			params->canon_props[i].dpd.CurrentValue.u32 = value->u32;
-			break;
-		case PTP_DTC_STR:
-			strcpy((char*)data + 8, value->str);
-			free (params->canon_props[i].dpd.CurrentValue.str);
-			params->canon_props[i].dpd.CurrentValue.str = strdup(value->str);
-			break;
-		}
+        case PTP_DPC_CANON_EOS_ImageFormat:
+        case PTP_DPC_CANON_EOS_ImageFormatCF:
+        case PTP_DPC_CANON_EOS_ImageFormatSD:
+        case PTP_DPC_CANON_EOS_ImageFormatExtHD:
+            /* special handling of ImageFormat properties */
+            size = 8 + ptp_pack_EOS_ImageFormat( params, NULL, value->u16 );
+            data = malloc( size );
+            if (!data) return PTP_RC_GeneralError;
+            params->canon_props[i].dpd.CurrentValue.u16 = value->u16;
+            ptp_pack_EOS_ImageFormat( params, data + 8, value->u16 );
+            break;
+        case PTP_DPC_CANON_EOS_CustomFuncEx:
+            /* special handling of CustomFuncEx properties */
+            ptp_debug (params, "ptp2/ptp_canon_eos_setdevicepropvalue: setting EOS prop %x to %s",propcode,value->str);
+            size = 8 + ptp_pack_EOS_CustomFuncEx( params, NULL, value->str );
+            data = malloc( size );
+            if (!data) return PTP_RC_GeneralError;
+            params->canon_props[i].dpd.CurrentValue.str = strdup( value->str );
+            ptp_pack_EOS_CustomFuncEx( params, data + 8, value->str );
+            break;
+        default:
+            if (datatype != PTP_DTC_STR) {
+                data = calloc(sizeof(uint32_t),3);
+                if (!data) return PTP_RC_GeneralError;
+                size = sizeof(uint32_t)*3;
+            } else {
+                size = strlen(value->str) + 1 + 8;
+                data = calloc(sizeof(char),size);
+                if (!data) return PTP_RC_GeneralError;
+            }
+            switch (datatype) {
+                case PTP_DTC_INT8:
+                case PTP_DTC_UINT8:
+                    /*fprintf (stderr, "%x -> %d\n", propcode, value->u8);*/
+                    htod8a(&data[8], value->u8);
+                    params->canon_props[i].dpd.CurrentValue.u8 = value->u8;
+                    break;
+                case PTP_DTC_UINT16:
+                case PTP_DTC_INT16:
+                    /*fprintf (stderr, "%x -> %d\n", propcode, value->u16);*/
+                    htod16a(&data[8], value->u16);
+                    params->canon_props[i].dpd.CurrentValue.u16 = value->u16;
+                    break;
+                case PTP_DTC_INT32:
+                case PTP_DTC_UINT32:
+                    /*fprintf (stderr, "%x -> %d\n", propcode, value->u32);*/
+                    htod32a(&data[8], value->u32);
+                    params->canon_props[i].dpd.CurrentValue.u32 = value->u32;
+                    break;
+                case PTP_DTC_STR:
+                    strcpy((char*)data + 8, value->str);
+                    free (params->canon_props[i].dpd.CurrentValue.str);
+                    params->canon_props[i].dpd.CurrentValue.str = strdup(value->str);
+                    break;
+            }
 	}
-
+    
 	htod32a(&data[0], size);
 	htod32a(&data[4], propcode);
-
+    
 	ret = ptp_transaction(params, &ptp, PTP_DP_SENDDATA, size, &data, NULL);
 	free (data);
 	return ret;
@@ -2019,7 +2606,7 @@ ptp_canon_eos_setdevicepropvalue (PTPParams* params,
 /**
  * ptp_canon_getpartialobject:
  *
- * This operation is used to read from the device a data 
+ * This operation is used to read from the device a data
  * block of an object from a specified offset.
  *
  * params:	PTPParams*
@@ -2035,10 +2622,10 @@ ptp_canon_eos_setdevicepropvalue (PTPParams* params,
  *
  **/
 uint16_t
-ptp_canon_getpartialobject (PTPParams* params, uint32_t handle, 
-				uint32_t offset, uint32_t size,
-				uint32_t pos, unsigned char** block, 
-				uint32_t* readnum)
+ptp_canon_getpartialobject (PTPParams* params, uint32_t handle,
+                            uint32_t offset, uint32_t size,
+                            uint32_t pos, unsigned char** block,
+                            uint32_t* readnum)
 {
 	uint16_t ret;
 	PTPContainer ptp;
@@ -2069,9 +2656,9 @@ ptp_canon_getpartialobject (PTPParams* params, uint32_t handle,
  * Of course, prior to calling this operation, one must turn the viewfinder
  * on with the CANON_ViewfinderOn command.
  * Invoking this operation many times, one can get live video from the camera!
- * 
+ *
  * params:	PTPParams*
- * 
+ *
  * Return values: Some PTP_RC_* code.
  *      char **image - the pointer to the read image
  *      unit32_t *size - the size of the image in bytes
@@ -2096,14 +2683,14 @@ ptp_canon_getviewfinderimage (PTPParams* params, unsigned char** image, uint32_t
  * ptp_canon_getchanges:
  *
  * This is an interesting operation, about the effect of which I am not sure.
- * This command is called every time when a device property has been changed 
+ * This command is called every time when a device property has been changed
  * with the SetDevicePropValue operation, and after some other operations.
  * This operation reads the array of Device Properties which have been changed
  * by the previous operation.
  * Probably, this operation is even required to make those changes work.
  *
  * params:	PTPParams*
- * 
+ *
  * Return values: Some PTP_RC_* code.
  *      uint16_t** props - the pointer to the array of changed properties
  *      uint32_t* propnum - the number of elements in the *props array
@@ -2123,7 +2710,7 @@ ptp_canon_getchanges (PTPParams* params, uint16_t** props, uint32_t* propnum)
 	len=0;
 	ret=ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, &data, &len);
 	if (ret == PTP_RC_OK)
-        	*propnum=ptp_unpack_uint16_t_array(params,data,0,props);
+        *propnum=ptp_unpack_uint16_t_array(params,data,0,props);
 	free(data);
 	return ret;
 }
@@ -2133,17 +2720,17 @@ ptp_canon_getchanges (PTPParams* params, uint16_t** props, uint32_t* propnum)
  *
  * This command reads a specified object's record in a device's filesystem,
  * or the records of all objects belonging to a specified folder (association).
- *  
+ *
  * params:	PTPParams*
  *      uint32_t store - StorageID,
  *      uint32_t p2 - Yet unknown (0 value works OK)
  *      uint32_t parent - Parent Object Handle
- *                      # If Parent Object Handle is 0xffffffff, 
+ *                      # If Parent Object Handle is 0xffffffff,
  *                      # the Parent Object is the top level folder.
  *      uint32_t handle - Object Handle
- *                      # If Object Handle is 0, the records of all objects 
+ *                      # If Object Handle is 0, the records of all objects
  *                      # belonging to the Parent Object are read.
- *                      # If Object Handle is not 0, only the record of this 
+ *                      # If Object Handle is not 0, only the record of this
  *                      # Object is read.
  *
  * Return values: Some PTP_RC_* code.
@@ -2152,9 +2739,9 @@ ptp_canon_getchanges (PTPParams* params, uint16_t** props, uint32_t* propnum)
  *
  **/
 uint16_t
-ptp_canon_getobjectinfo (PTPParams* params, uint32_t store, uint32_t p2, 
-			    uint32_t parent, uint32_t handle, 
-			    PTPCANONFolderEntry** entries, uint32_t* entnum)
+ptp_canon_getobjectinfo (PTPParams* params, uint32_t store, uint32_t p2,
+                         uint32_t parent, uint32_t handle,
+                         PTPCANONFolderEntry** entries, uint32_t* entnum)
 {
 	uint16_t ret;
 	PTPContainer ptp;
@@ -2171,14 +2758,14 @@ ptp_canon_getobjectinfo (PTPParams* params, uint32_t store, uint32_t p2,
 	len=0;
 	ret=ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, &data, &len);
 	if (ret == PTP_RC_OK) {
-		int i;
+		unsigned int i;
 		*entnum=ptp.Param1;
 		*entries=calloc(*entnum, sizeof(PTPCANONFolderEntry));
 		if (*entries!=NULL) {
 			for(i=0; i<(*entnum); i++)
 				ptp_unpack_Canon_FE(params,
-					data+i*PTP_CANON_FolderEntryLen,
-					&((*entries)[i]) );
+                                    data+i*PTP_CANON_FolderEntryLen,
+                                    &((*entries)[i]) );
 		} else {
 			ret=PTP_ERROR_IO; /* Cannot allocate memory */
 		}
@@ -2196,7 +2783,7 @@ ptp_canon_getobjectinfo (PTPParams* params, uint32_t store, uint32_t p2,
  *
  * The 'A' is the VolumeLabel from GetStorageInfo,
  * my IXUS has "A" for the card and "V" for internal memory.
- *  
+ *
  * params:	PTPParams*
  *      char* name - path name
  *
@@ -2211,7 +2798,7 @@ ptp_canon_get_objecthandle_by_name (PTPParams* params, char* name, uint32_t* obj
 	PTPContainer ptp;
 	unsigned char *data = NULL;
 	uint8_t len;
-
+    
 	PTP_CNT_INIT (ptp);
 	ptp.Code=PTP_OC_CANON_GetObjectHandleByName;
 	ptp.Nparam=0;
@@ -2230,7 +2817,7 @@ ptp_canon_get_objecthandle_by_name (PTPParams* params, char* name, uint32_t* obj
  *
  * This command downloads the specified theme slot, including jpegs
  * and wav files.
- *  
+ *
  * params:	PTPParams*
  *      uint32_t themenr - nr of theme
  *
@@ -2241,17 +2828,17 @@ ptp_canon_get_objecthandle_by_name (PTPParams* params, char* name, uint32_t* obj
  **/
 uint16_t
 ptp_canon_get_customize_data (PTPParams* params, uint32_t themenr,
-		unsigned char **data, unsigned int *size)
+                              unsigned char **data, unsigned int *size)
 {
 	PTPContainer ptp;
-
+    
 	*data = NULL;
 	*size = 0;
 	PTP_CNT_INIT(ptp);
 	ptp.Code	= PTP_OC_CANON_GetCustomizeData;
 	ptp.Param1	= themenr;
 	ptp.Nparam	= 1;
-	return ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, data, size); 
+	return ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, data, size);
 }
 
 
@@ -2263,14 +2850,14 @@ ptp_nikon_curve_download (PTPParams* params, unsigned char **data, unsigned int 
 	PTP_CNT_INIT(ptp);
 	ptp.Code	= PTP_OC_NIKON_CurveDownload;
 	ptp.Nparam	= 0;
-	return ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, data, size); 
+	return ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, data, size);
 }
 
 /**
  * ptp_canon_get_vendorpropcodes:
  *
  * This command downloads the vendor specific property codes.
- *  
+ *
  * params:	PTPParams*
  *
  * Return values: Some PTP_RC_* code.
@@ -2284,24 +2871,24 @@ ptp_nikon_get_vendorpropcodes (PTPParams* params, uint16_t **props, unsigned int
 	uint16_t	ret;
 	unsigned char	*xdata = NULL;
 	unsigned int 	xsize;
-
+    
 	*props = NULL;
 	*size = 0;
 	PTP_CNT_INIT(ptp);
 	ptp.Code	= PTP_OC_NIKON_GetVendorPropCodes;
 	ptp.Nparam	= 0;
-	ret = ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, &xdata, &xsize); 
+	ret = ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, &xdata, &xsize);
 	if (ret == PTP_RC_OK)
-        	*size = ptp_unpack_uint16_t_array(params,xdata,0,props);
+        *size = ptp_unpack_uint16_t_array(params,xdata,0,props);
 	free (xdata);
 	return ret;
 }
 
 uint16_t
 ptp_nikon_getfileinfoinblock ( PTPParams* params,
-	uint32_t p1, uint32_t p2, uint32_t p3,
-	unsigned char **data, unsigned int *size
-) {
+                              uint32_t p1, uint32_t p2, uint32_t p3,
+                              unsigned char **data, unsigned int *size
+                              ) {
 	PTPContainer ptp;
 	*data = NULL;
 	*size = 0;
@@ -2311,14 +2898,14 @@ ptp_nikon_getfileinfoinblock ( PTPParams* params,
 	ptp.Param1	= p1;
 	ptp.Param2	= p2;
 	ptp.Param3	= p3;
-	return ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, data, size); 
+	return ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, data, size);
 }
 
 /**
  * ptp_nikon_get_liveview_image:
  *
  * This command gets a LiveView image from newer Nikons DSLRs.
- *  
+ *
  * params:	PTPParams*
  *
  * Return values: Some PTP_RC_* code.
@@ -2327,19 +2914,19 @@ ptp_nikon_getfileinfoinblock ( PTPParams* params,
 uint16_t
 ptp_nikon_get_liveview_image (PTPParams* params, unsigned char **data, unsigned int *size)
 {
-        PTPContainer ptp;
-        
-        PTP_CNT_INIT(ptp);
-        ptp.Code=PTP_OC_NIKON_GetLiveViewImg;
-        ptp.Nparam=0;
-        return ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, data, size);
+    PTPContainer ptp;
+    
+    PTP_CNT_INIT(ptp);
+    ptp.Code=PTP_OC_NIKON_GetLiveViewImg;
+    ptp.Nparam=0;
+    return ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, data, size);
 }
 
 /**
  * ptp_nikon_get_preview_image:
  *
  * This command gets a Preview image from newer Nikons DSLRs.
- *  
+ *
  * params:	PTPParams*
  *
  * Return values: Some PTP_RC_* code.
@@ -2347,15 +2934,19 @@ ptp_nikon_get_liveview_image (PTPParams* params, unsigned char **data, unsigned 
  **/
 uint16_t
 ptp_nikon_get_preview_image (PTPParams* params, unsigned char **xdata, unsigned int *xsize,
-	uint32_t *handle)
+                             uint32_t *handle)
 {
-        PTPContainer	ptp;
+    PTPContainer	ptp;
 	uint16_t	ret;
-        
-        PTP_CNT_INIT(ptp);
-        ptp.Code=PTP_OC_NIKON_GetPreviewImg;
-        ptp.Nparam=0;
-        ret = ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, xdata, xsize);
+    
+    PTP_CNT_INIT(ptp);
+    ptp.Code=PTP_OC_NIKON_GetPreviewImg;
+    ptp.Nparam=0;
+	/* FIXME:
+	 * pdslrdashboard passes 3 parameters:
+	 * objectid, minimum size, maximum size
+	 */
+    ret = ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, xdata, xsize);
 	if (ret == PTP_RC_OK) {
 		if (ptp.Nparam > 0)
 			*handle = ptp.Param1;
@@ -2367,7 +2958,7 @@ ptp_nikon_get_preview_image (PTPParams* params, unsigned char **xdata, unsigned 
  * ptp_canon_eos_get_viewfinder_image:
  *
  * This command gets a Viewfinder image from newer Nikons DSLRs.
- *  
+ *
  * params:	PTPParams*
  *
  * Return values: Some PTP_RC_* code.
@@ -2376,32 +2967,32 @@ ptp_nikon_get_preview_image (PTPParams* params, unsigned char **xdata, unsigned 
 uint16_t
 ptp_canon_eos_get_viewfinder_image (PTPParams* params, unsigned char **data, unsigned int *size)
 {
-        PTPContainer ptp;
-        
-        PTP_CNT_INIT(ptp);
-        ptp.Code=PTP_OC_CANON_EOS_GetViewFinderData;
-        ptp.Nparam=1;
-        ptp.Param1=0x00100000; /* from trace */
-        return ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, data, size);
+    PTPContainer ptp;
+    
+    PTP_CNT_INIT(ptp);
+    ptp.Code=PTP_OC_CANON_EOS_GetViewFinderData;
+    ptp.Nparam=1;
+    ptp.Param1=0x00100000; /* from trace */
+    return ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, data, size);
 }
 
 uint16_t
 ptp_canon_eos_get_viewfinder_image_handler (PTPParams* params, PTPDataHandler*handler)
 {
-        PTPContainer ptp;
-        
-        PTP_CNT_INIT(ptp);
-        ptp.Code=PTP_OC_CANON_EOS_GetViewFinderData;
-        ptp.Nparam=1;
-        ptp.Param1=0x00100000; /* from trace */
-        return ptp_transaction_new(params, &ptp, PTP_DP_GETDATA, 0, handler);
+    PTPContainer ptp;
+    
+    PTP_CNT_INIT(ptp);
+    ptp.Code=PTP_OC_CANON_EOS_GetViewFinderData;
+    ptp.Nparam=1;
+    ptp.Param1=0x00100000; /* from trace */
+    return ptp_transaction_new(params, &ptp, PTP_DP_GETDATA, 0, handler);
 }
 
 /**
  * ptp_nikon_check_event:
  *
  * This command checks the event queue on the Nikon.
- *  
+ *
  * params:	PTPParams*
  *      PTPUSBEventContainer **event - list of usb events.
  *	int *evtcnt - number of usb events in event structure.
@@ -2410,13 +3001,13 @@ ptp_canon_eos_get_viewfinder_image_handler (PTPParams* params, PTPDataHandler*ha
  *
  **/
 uint16_t
-ptp_nikon_check_event (PTPParams* params, PTPContainer** event, int* evtcnt)
+ptp_nikon_check_event (PTPParams* params, PTPContainer** event, unsigned int* evtcnt)
 {
-        PTPContainer ptp;
+    PTPContainer ptp;
 	uint16_t ret;
 	unsigned char *data = NULL;
 	unsigned int size = 0;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_NIKON_CheckEvent;
 	ptp.Nparam=0;
@@ -2433,7 +3024,7 @@ ptp_nikon_check_event (PTPParams* params, PTPContainer** event, int* evtcnt)
  * ptp_nikon_getptpipinfo:
  *
  * This command gets the ptpip info data.
- *  
+ *
  * params:	PTPParams*
  *	unsigned char *data	- data
  *	unsigned int size	- size of returned data
@@ -2444,19 +3035,19 @@ ptp_nikon_check_event (PTPParams* params, PTPContainer** event, int* evtcnt)
 uint16_t
 ptp_nikon_getptpipinfo (PTPParams* params, unsigned char **data, unsigned int *size)
 {
-        PTPContainer ptp;
-        
-        PTP_CNT_INIT(ptp);
-        ptp.Code=PTP_OC_NIKON_GetDevicePTPIPInfo;
-        ptp.Nparam=0;
-        return ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, data, size);
+    PTPContainer ptp;
+    
+    PTP_CNT_INIT(ptp);
+    ptp.Code=PTP_OC_NIKON_GetDevicePTPIPInfo;
+    ptp.Nparam=0;
+    return ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, data, size);
 }
 
 /**
  * ptp_nikon_getwifiprofilelist:
  *
  * This command gets the wifi profile list.
- *  
+ *
  * params:	PTPParams*
  *
  * Return values: Some PTP_RC_* code.
@@ -2465,7 +3056,7 @@ ptp_nikon_getptpipinfo (PTPParams* params, unsigned char **data, unsigned int *s
 uint16_t
 ptp_nikon_getwifiprofilelist (PTPParams* params)
 {
-        PTPContainer ptp;
+    PTPContainer ptp;
 	unsigned char* data;
 	unsigned int size;
 	unsigned int pos;
@@ -2474,15 +3065,15 @@ ptp_nikon_getwifiprofilelist (PTPParams* params)
 	char* buffer;
 	uint8_t len;
 	
-        PTP_CNT_INIT(ptp);
-        ptp.Code=PTP_OC_NIKON_GetProfileAllData;
-        ptp.Nparam=0;
+    PTP_CNT_INIT(ptp);
+    ptp.Code=PTP_OC_NIKON_GetProfileAllData;
+    ptp.Nparam=0;
 	size = 0;
 	data = NULL;
 	CHECK_PTP_RC(ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, &data, &size));
-
+    
 	if (size < 2) return PTP_RC_Undefined; /* FIXME: Add more precise error code */
-
+    
 	params->wifi_profiles_version = data[0];
 	params->wifi_profiles_number = data[1];
 	if (params->wifi_profiles)
@@ -2490,25 +3081,25 @@ ptp_nikon_getwifiprofilelist (PTPParams* params)
 	
 	params->wifi_profiles = malloc(params->wifi_profiles_number*sizeof(PTPNIKONWifiProfile));
 	memset(params->wifi_profiles, 0, params->wifi_profiles_number*sizeof(PTPNIKONWifiProfile));
-
+    
 	pos = 2;
 	profn = 0;
 	while (profn < params->wifi_profiles_number && pos < size) {
 		if (pos+6 >= size) return PTP_RC_Undefined;
 		params->wifi_profiles[profn].id = data[pos++];
 		params->wifi_profiles[profn].valid = data[pos++];
-
+        
 		n = dtoh32a(&data[pos]);
 		pos += 4;
 		if (pos+n+4 >= size) return PTP_RC_Undefined;
 		strncpy(params->wifi_profiles[profn].profile_name, (char*)&data[pos], n);
 		params->wifi_profiles[profn].profile_name[16] = '\0';
 		pos += n;
-
+        
 		params->wifi_profiles[profn].display_order = data[pos++];
 		params->wifi_profiles[profn].device_type = data[pos++];
 		params->wifi_profiles[profn].icon_type = data[pos++];
-
+        
 		buffer = ptp_unpack_string(params, data, pos, &len);
 		strncpy(params->wifi_profiles[profn].creation_date, buffer, sizeof(params->wifi_profiles[profn].creation_date));
 		free (buffer);
@@ -2530,7 +3121,7 @@ ptp_nikon_getwifiprofilelist (PTPParams* params)
 		pos += 1;
 		profn++;
 	}
-
+    
 #if 0
 	PTPNIKONWifiProfile test;
 	memset(&test, 0, sizeof(PTPNIKONWifiProfile));
@@ -2542,10 +3133,10 @@ ptp_nikon_getwifiprofilelist (PTPParams* params)
 	test.access_mode = 1;
 	test.wifi_channel = 1;
 	test.key_nr = 1;
-
+    
 	ptp_nikon_writewifiprofile(params, &test);
 #endif
-
+    
 	return PTP_RC_OK;
 }
 
@@ -2553,7 +3144,7 @@ ptp_nikon_getwifiprofilelist (PTPParams* params)
  * ptp_nikon_writewifiprofile:
  *
  * This command gets the ptpip info data.
- *  
+ *
  * params:	PTPParams*
  *	unsigned int profilenr	- profile number
  *	unsigned char *data	- data
@@ -2576,7 +3167,7 @@ ptp_nikon_writewifiprofile (PTPParams* params, PTPNIKONWifiProfile* profile)
 	int profilenr = -1;
 	
 	ptp_nikon_getptpipguid(guid);
-
+    
 	if (!params->wifi_profiles)
 		CHECK_PTP_RC(ptp_nikon_getwifiprofilelist(params));
 	
@@ -2609,9 +3200,11 @@ ptp_nikon_writewifiprofile (PTPParams* params, PTPNIKONWifiProfile* profile)
 	ptp_pack_string(params, "19990909T090909", data, 0x19, &len);
 	
 	/* IP parameters */
-	*((unsigned int*)&buffer[0x3A]) = profile->ip_address; /* Do not reverse bytes */
+	memcpy(&buffer[0x3A],&profile->ip_address,sizeof(profile->ip_address));
+	/**((unsigned int*)&buffer[0x3A]) = profile->ip_address; *//* Do not reverse bytes */
 	buffer[0x3E] = profile->subnet_mask;
-	*((unsigned int*)&buffer[0x3F]) = profile->gateway_address; /* Do not reverse bytes */
+	memcpy(&buffer[0x3F],&profile->gateway_address,sizeof(profile->gateway_address));
+	/**((unsigned int*)&buffer[0x3F]) = profile->gateway_address; */ /* Do not reverse bytes */
 	buffer[0x43] = profile->address_mode;
 	
 	/* Wifi parameters */
@@ -2619,7 +3212,7 @@ ptp_nikon_writewifiprofile (PTPParams* params, PTPNIKONWifiProfile* profile)
 	buffer[0x45] = profile->wifi_channel;
 	
 	htod32a(&buffer[0x46], 33); /* essid */
-	 /* 32 as third parameter, so there will always be a null-byte in the end */
+    /* 32 as third parameter, so there will always be a null-byte in the end */
 	strncpy((char*)&buffer[0x4A], profile->essid, 32);
 	
 	buffer[0x6B] = profile->authentification;
@@ -2632,17 +3225,17 @@ ptp_nikon_writewifiprofile (PTPParams* params, PTPNIKONWifiProfile* profile)
 	memcpy(&buffer[0xB2], guid, 16);
 	
 	switch(profile->encryption) {
-	case 1: /* WEP 64bit */
-		htod16a(&buffer[0xC2], 5); /* (64-24)/8 = 5 */
-		break;
-	case 2: /* WEP 128bit */
-		htod16a(&buffer[0xC2], 13); /* (128-24)/8 = 13 */
-		break;
-	default:
-		htod16a(&buffer[0xC2], 0);
+        case 1: /* WEP 64bit */
+            htod16a(&buffer[0xC2], 5); /* (64-24)/8 = 5 */
+            break;
+        case 2: /* WEP 128bit */
+            htod16a(&buffer[0xC2], 13); /* (128-24)/8 = 13 */
+            break;
+        default:
+            htod16a(&buffer[0xC2], 0);
 	}
 	size = 0xC4;
-	       
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_NIKON_SendProfileData;
 	ptp.Nparam=1;
@@ -2654,7 +3247,7 @@ ptp_nikon_writewifiprofile (PTPParams* params, PTPNIKONWifiProfile* profile)
  * ptp_mtp_getobjectpropssupported:
  *
  * This command gets the object properties possible from the device.
- *  
+ *
  * params:	PTPParams*
  *	uint ofc		- object format code
  *	unsigned int *propnum	- number of elements in returned array
@@ -2665,20 +3258,20 @@ ptp_nikon_writewifiprofile (PTPParams* params, PTPNIKONWifiProfile* profile)
  **/
 uint16_t
 ptp_mtp_getobjectpropssupported (PTPParams* params, uint16_t ofc,
-		 uint32_t *propnum, uint16_t **props
-) {
-        PTPContainer ptp;
+                                 uint32_t *propnum, uint16_t **props
+                                 ) {
+    PTPContainer ptp;
 	uint16_t ret;
 	unsigned char *data = NULL;
 	unsigned int size = 0;
-        
-        PTP_CNT_INIT(ptp);
-        ptp.Code=PTP_OC_MTP_GetObjectPropsSupported;
-        ptp.Nparam = 1;
-        ptp.Param1 = ofc;
-        ret = ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, &data, &size);
+    
+    PTP_CNT_INIT(ptp);
+    ptp.Code=PTP_OC_MTP_GetObjectPropsSupported;
+    ptp.Nparam = 1;
+    ptp.Param1 = ofc;
+    ret = ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, &data, &size);
 	if (ret == PTP_RC_OK)
-        	*propnum=ptp_unpack_uint16_t_array(params,data,0,props);
+        *propnum=ptp_unpack_uint16_t_array(params,data,0,props);
 	free(data);
 	return ret;
 }
@@ -2687,7 +3280,7 @@ ptp_mtp_getobjectpropssupported (PTPParams* params, uint16_t ofc,
  * ptp_mtp_getobjectpropdesc:
  *
  * This command gets the object property description.
- *  
+ *
  * params:	PTPParams*
  *	uint16_t opc	- object property code
  *	uint16_t ofc	- object format code
@@ -2697,19 +3290,19 @@ ptp_mtp_getobjectpropssupported (PTPParams* params, uint16_t ofc,
  **/
 uint16_t
 ptp_mtp_getobjectpropdesc (
-	PTPParams* params, uint16_t opc, uint16_t ofc, PTPObjectPropDesc *opd
-) {
-        PTPContainer ptp;
+                           PTPParams* params, uint16_t opc, uint16_t ofc, PTPObjectPropDesc *opd
+                           ) {
+    PTPContainer ptp;
 	uint16_t ret;
 	unsigned char *data = NULL;
 	unsigned int size = 0;
-        
-        PTP_CNT_INIT(ptp);
-        ptp.Code=PTP_OC_MTP_GetObjectPropDesc;
-        ptp.Nparam = 2;
-        ptp.Param1 = opc;
-        ptp.Param2 = ofc;
-        ret = ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, &data, &size);
+    
+    PTP_CNT_INIT(ptp);
+    ptp.Code=PTP_OC_MTP_GetObjectPropDesc;
+    ptp.Nparam = 2;
+    ptp.Param1 = opc;
+    ptp.Param2 = ofc;
+    ret = ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, &data, &size);
 	if (ret == PTP_RC_OK)
 		ptp_unpack_OPD (params, data, opd, size);
 	free(data);
@@ -2720,7 +3313,7 @@ ptp_mtp_getobjectpropdesc (
  * ptp_mtp_getobjectpropvalue:
  *
  * This command gets the object properties of an object handle.
- *  
+ *
  * params:	PTPParams*
  *	uint32_t objectid	- object format code
  *	uint16_t opc		- object prop code
@@ -2730,21 +3323,21 @@ ptp_mtp_getobjectpropdesc (
  **/
 uint16_t
 ptp_mtp_getobjectpropvalue (
-	PTPParams* params, uint32_t oid, uint16_t opc,
-	PTPPropertyValue *value, uint16_t datatype
-) {
-        PTPContainer ptp;
+                            PTPParams* params, uint32_t oid, uint16_t opc,
+                            PTPPropertyValue *value, uint16_t datatype
+                            ) {
+    PTPContainer ptp;
 	uint16_t ret;
 	unsigned char *data = NULL;
 	unsigned int size = 0;
-	int offset = 0;
-        
-        PTP_CNT_INIT(ptp);
-        ptp.Code=PTP_OC_MTP_GetObjectPropValue;
-        ptp.Nparam = 2;
-        ptp.Param1 = oid;
-        ptp.Param2 = opc;
-        ret = ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, &data, &size);
+	unsigned int offset = 0;
+    
+    PTP_CNT_INIT(ptp);
+    ptp.Code=PTP_OC_MTP_GetObjectPropValue;
+    ptp.Nparam = 2;
+    ptp.Param1 = oid;
+    ptp.Param2 = opc;
+    ret = ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, &data, &size);
 	if (ret == PTP_RC_OK)
 		ptp_unpack_DPV(params, data, &offset, size, value, datatype);
 	free(data);
@@ -2755,7 +3348,7 @@ ptp_mtp_getobjectpropvalue (
  * ptp_mtp_setobjectpropvalue:
  *
  * This command gets the object properties of an object handle.
- *  
+ *
  * params:	PTPParams*
  *	uint32_t objectid	- object format code
  *	uint16_t opc		- object prop code
@@ -2765,21 +3358,21 @@ ptp_mtp_getobjectpropvalue (
  **/
 uint16_t
 ptp_mtp_setobjectpropvalue (
-	PTPParams* params, uint32_t oid, uint16_t opc,
-	PTPPropertyValue *value, uint16_t datatype
-) {
-        PTPContainer ptp;
+                            PTPParams* params, uint32_t oid, uint16_t opc,
+                            PTPPropertyValue *value, uint16_t datatype
+                            ) {
+    PTPContainer ptp;
 	uint16_t ret;
 	unsigned char *data = NULL;
 	unsigned int size ;
-        
-        PTP_CNT_INIT(ptp);
-        ptp.Code=PTP_OC_MTP_SetObjectPropValue;
-        ptp.Nparam = 2;
-        ptp.Param1 = oid;
-        ptp.Param2 = opc;
+    
+    PTP_CNT_INIT(ptp);
+    ptp.Code=PTP_OC_MTP_SetObjectPropValue;
+    ptp.Nparam = 2;
+    ptp.Param1 = oid;
+    ptp.Param2 = opc;
 	size = ptp_pack_DPV(params, value, &data, datatype);
-        ret = ptp_transaction(params, &ptp, PTP_DP_SENDDATA, size, &data, NULL);
+    ret = ptp_transaction(params, &ptp, PTP_DP_SENDDATA, size, &data, NULL);
 	free(data);
 	return ret;
 }
@@ -2791,7 +3384,7 @@ ptp_mtp_getobjectreferences (PTPParams* params, uint32_t handle, uint32_t** ohAr
 	uint16_t ret;
 	unsigned char* dpv=NULL;
 	unsigned int dpvlen = 0;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_MTP_GetObjectReferences;
 	ptp.Param1=handle;
@@ -2818,7 +3411,7 @@ ptp_mtp_setobjectreferences (PTPParams* params, uint32_t handle, uint32_t* ohArr
 	uint16_t ret;
 	uint32_t size;
 	unsigned char* dpv=NULL;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code   = PTP_OC_MTP_SetObjectReferences;
 	ptp.Param1 = handle;
@@ -2836,7 +3429,7 @@ ptp_mtp_getobjectproplist (PTPParams* params, uint32_t handle, MTPProperties **p
 	PTPContainer ptp;
 	unsigned char* opldata = NULL;
 	unsigned int oplsize;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code = PTP_OC_MTP_GetObjPropList;
 	ptp.Param1 = handle;
@@ -2845,7 +3438,7 @@ ptp_mtp_getobjectproplist (PTPParams* params, uint32_t handle, MTPProperties **p
 	ptp.Param4 = 0x00000000U;
 	ptp.Param5 = 0xFFFFFFFFU;  /* means - return full tree below the Param1 handle */
 	ptp.Nparam = 5;
-	ret = ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, &opldata, &oplsize);  
+	ret = ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, &opldata, &oplsize);
 	if (ret == PTP_RC_OK) *nrofprops = ptp_unpack_OPL(params, opldata, props, oplsize);
 	if (opldata != NULL)
 		free(opldata);
@@ -2859,7 +3452,7 @@ ptp_mtp_getobjectproplist_single (PTPParams* params, uint32_t handle, MTPPropert
 	PTPContainer ptp;
 	unsigned char* opldata = NULL;
 	unsigned int oplsize;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code = PTP_OC_MTP_GetObjPropList;
 	ptp.Param1 = handle;
@@ -2868,7 +3461,7 @@ ptp_mtp_getobjectproplist_single (PTPParams* params, uint32_t handle, MTPPropert
 	ptp.Param4 = 0x00000000U;
 	ptp.Param5 = 0x00000000U;  /* means - return single tree below the Param1 handle */
 	ptp.Nparam = 5;
-	ret = ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, &opldata, &oplsize);  
+	ret = ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, &opldata, &oplsize);
 	if (ret == PTP_RC_OK) *nrofprops = ptp_unpack_OPL(params, opldata, props, oplsize);
 	if (opldata != NULL)
 		free(opldata);
@@ -2877,13 +3470,13 @@ ptp_mtp_getobjectproplist_single (PTPParams* params, uint32_t handle, MTPPropert
 
 uint16_t
 ptp_mtp_sendobjectproplist (PTPParams* params, uint32_t* store, uint32_t* parenthandle, uint32_t* handle,
-			    uint16_t objecttype, uint64_t objectsize, MTPProperties *props, int nrofprops)
+                            uint16_t objecttype, uint64_t objectsize, MTPProperties *props, int nrofprops)
 {
 	uint16_t ret;
 	PTPContainer ptp;
 	unsigned char* opldata=NULL;
 	uint32_t oplsize;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code = PTP_OC_MTP_SendObjectPropList;
 	ptp.Param1 = *store;
@@ -2892,15 +3485,15 @@ ptp_mtp_sendobjectproplist (PTPParams* params, uint32_t* store, uint32_t* parent
 	ptp.Param4 = (uint32_t) (objectsize >> 32);
 	ptp.Param5 = (uint32_t) (objectsize & 0xffffffffU);
 	ptp.Nparam = 5;
-
+    
 	/* Set object handle to 0 for a new object */
 	oplsize = ptp_pack_OPL(params,props,nrofprops,&opldata);
-	ret = ptp_transaction(params, &ptp, PTP_DP_SENDDATA, oplsize, &opldata, NULL); 
+	ret = ptp_transaction(params, &ptp, PTP_DP_SENDDATA, oplsize, &opldata, NULL);
 	free(opldata);
 	*store = ptp.Param1;
 	*parenthandle = ptp.Param2;
-	*handle = ptp.Param3; 
-
+	*handle = ptp.Param3;
+    
 	return ret;
 }
 
@@ -2911,15 +3504,15 @@ ptp_mtp_setobjectproplist (PTPParams* params, MTPProperties *props, int nrofprop
 	PTPContainer ptp;
 	unsigned char* opldata=NULL;
 	uint32_t oplsize;
-  
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code = PTP_OC_MTP_SetObjPropList;
 	ptp.Nparam = 0;
-  
+    
 	oplsize = ptp_pack_OPL(params,props,nrofprops,&opldata);
-	ret = ptp_transaction(params, &ptp, PTP_DP_SENDDATA, oplsize, &opldata, NULL); 
+	ret = ptp_transaction(params, &ptp, PTP_DP_SENDDATA, oplsize, &opldata, NULL);
 	free(opldata);
-
+    
 	return ret;
 }
 
@@ -2927,7 +3520,7 @@ uint16_t
 ptp_mtpz_sendwmdrmpdapprequest (PTPParams* params, unsigned char *appcertmsg, uint32_t size)
 {
 	PTPContainer ptp;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_MTP_WMDRMPD_SendWMDRMPDAppRequest;
 	return ptp_transaction (params, &ptp, PTP_DP_SENDDATA, size, &appcertmsg, NULL);
@@ -2937,7 +3530,7 @@ uint16_t
 ptp_mtpz_getwmdrmpdappresponse (PTPParams* params, unsigned char **response, uint32_t *size)
 {
 	PTPContainer ptp;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code = PTP_OC_MTP_WMDRMPD_GetWMDRMPDAppResponse;
 	*size = 0;
@@ -2951,7 +3544,7 @@ uint16_t
 ptp_chdk_get_memory(PTPParams* params, int start, int num, unsigned char **buf )
 {
 	PTPContainer ptp;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_CHDK;
 	ptp.Nparam=3;
@@ -2967,12 +3560,12 @@ ptp_chdk_call(PTPParams* params, int *args, int size, int *ret)
 {
 	uint16_t r;
 	PTPContainer ptp;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_CHDK;
 	ptp.Nparam=1;
 	ptp.Param1=PTP_CHDK_CallFunction;
-
+    
 	/* FIXME: check int packing */
 	r=ptp_transaction(params, &ptp, PTP_DP_SENDDATA, size*sizeof(int), (unsigned char **) &args, NULL);
 	if ( r == PTP_RC_OK )
@@ -2986,7 +3579,7 @@ uint16_t
 ptp_chdk_get_propcase(PTPParams* params, int start, int num, int* ints)
 {
 	PTPContainer ptp;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_CHDK;
 	ptp.Nparam=3;
@@ -3001,7 +3594,7 @@ uint16_t
 ptp_chdk_get_paramdata(PTPParams* params, int start, int num, unsigned char **buf)
 {
 	PTPContainer ptp;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_CHDK;
 	ptp.Nparam=3;
@@ -3014,96 +3607,96 @@ ptp_chdk_get_paramdata(PTPParams* params, int start, int num, unsigned char **bu
 #if 0
 int ptp_chdk_upload(char *local_fn, char *remote_fn, PTPParams* params, PTPDeviceInfo* deviceinfo)
 {
-  uint16_t ret;
-  PTPContainer ptp;
-  char *buf = NULL;
-  FILE *f;
-  int s,l;
-  struct stat st_buf;
-
-  PTP_CNT_INIT(ptp);
-  ptp.Code=PTP_OC_CHDK;
-  ptp.Nparam=2;
-  ptp.Param1=PTP_CHDK_UploadFile;
-
-  if (stat(local_fn, &st_buf)==0) ptp.Param2=st_buf.st_mtime-_timezone-_daylight; else ptp.Param2=0;
-
-  f = fopen(local_fn,"rb");
-  if ( f == NULL )
-  {
-    ptp_error(params,"could not open file \'%s\'",local_fn);
-    return 0;
-  }
-
-
-  fseek(f,0,SEEK_END);
-  s = ftell(f);
-  fseek(f,0,SEEK_SET);
-
-  l = strlen(remote_fn);
-  buf = malloc(4+l+s);
-  memcpy(buf,&l,4);
-  memcpy(buf+4,remote_fn,l);
-  fread(buf+4+l,1,s,f);
-
-  fclose(f);
-
-  ret=ptp_transaction(params, &ptp, PTP_DP_SENDDATA, 4+l+s, &buf);
-
-  free(buf);
-
-  if ( ret != 0x2001 )
-  {
-    ptp_error(params,"unexpected return code 0x%x",ret);
-    return 0;
-  }
-  return 1;
+    uint16_t ret;
+    PTPContainer ptp;
+    char *buf = NULL;
+    FILE *f;
+    int s,l;
+    struct stat st_buf;
+    
+    PTP_CNT_INIT(ptp);
+    ptp.Code=PTP_OC_CHDK;
+    ptp.Nparam=2;
+    ptp.Param1=PTP_CHDK_UploadFile;
+    
+    if (stat(local_fn, &st_buf)==0) ptp.Param2=st_buf.st_mtime-_timezone-_daylight; else ptp.Param2=0;
+    
+    f = fopen(local_fn,"rb");
+    if ( f == NULL )
+    {
+        ptp_error(params,"could not open file \'%s\'",local_fn);
+        return 0;
+    }
+    
+    
+    fseek(f,0,SEEK_END);
+    s = ftell(f);
+    fseek(f,0,SEEK_SET);
+    
+    l = strlen(remote_fn);
+    buf = malloc(4+l+s);
+    memcpy(buf,&l,4);
+    memcpy(buf+4,remote_fn,l);
+    fread(buf+4+l,1,s,f);
+    
+    fclose(f);
+    
+    ret=ptp_transaction(params, &ptp, PTP_DP_SENDDATA, 4+l+s, &buf);
+    
+    free(buf);
+    
+    if ( ret != 0x2001 )
+    {
+        ptp_error(params,"unexpected return code 0x%x",ret);
+        return 0;
+    }
+    return 1;
 }
 
 int ptp_chdk_download(char *remote_fn, char *local_fn, PTPParams* params, PTPDeviceInfo* deviceinfo)
 {
-  uint16_t ret;
-  PTPContainer ptp;
-  char *buf = NULL;
-  FILE *f;
-
-  PTP_CNT_INIT(ptp);
-  ptp.Code=PTP_OC_CHDK;
-  ptp.Nparam=1;
-  ptp.Param1=PTP_CHDK_TempData;
-  ret=ptp_transaction(params, &ptp, PTP_DP_SENDDATA, strlen(remote_fn), &remote_fn);
-  if ( ret != 0x2001 )
-  {
-    ptp_error(params,"unexpected return code 0x%x",ret);
-    return 0;
-  }
-
-  PTP_CNT_INIT(ptp);
-  ptp.Code=PTP_OC_CHDK;
-  ptp.Nparam=1;
-  ptp.Param1=PTP_CHDK_DownloadFile;
-
-  ret=ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, &buf);
-  if ( ret != 0x2001 )
-  {
-    ptp_error(params,"unexpected return code 0x%x",ret);
-    return 0;
-  }
-
-  f = fopen(local_fn,"wb");
-  if ( f == NULL )
-  {
-    ptp_error(params,"could not open file \'%s\'",local_fn);
+    uint16_t ret;
+    PTPContainer ptp;
+    char *buf = NULL;
+    FILE *f;
+    
+    PTP_CNT_INIT(ptp);
+    ptp.Code=PTP_OC_CHDK;
+    ptp.Nparam=1;
+    ptp.Param1=PTP_CHDK_TempData;
+    ret=ptp_transaction(params, &ptp, PTP_DP_SENDDATA, strlen(remote_fn), &remote_fn);
+    if ( ret != 0x2001 )
+    {
+        ptp_error(params,"unexpected return code 0x%x",ret);
+        return 0;
+    }
+    
+    PTP_CNT_INIT(ptp);
+    ptp.Code=PTP_OC_CHDK;
+    ptp.Nparam=1;
+    ptp.Param1=PTP_CHDK_DownloadFile;
+    
+    ret=ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, &buf);
+    if ( ret != 0x2001 )
+    {
+        ptp_error(params,"unexpected return code 0x%x",ret);
+        return 0;
+    }
+    
+    f = fopen(local_fn,"wb");
+    if ( f == NULL )
+    {
+        ptp_error(params,"could not open file \'%s\'",local_fn);
+        free(buf);
+        return 0;
+    }
+    
+    fwrite(buf,1,ptp.Param1,f);
+    fclose(f);
+    
     free(buf);
-    return 0;
-  }
-
-  fwrite(buf,1,ptp.Param1,f);
-  fclose(f);
-
-  free(buf);
-
-  return 1;
+    
+    return 1;
 }
 #endif
 
@@ -3112,7 +3705,7 @@ ptp_chdk_exec_lua(PTPParams* params, char *script, uint32_t *ret)
 {
 	uint16_t r;
 	PTPContainer ptp;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_CHDK;
 	ptp.Nparam=1;
@@ -3127,7 +3720,7 @@ ptp_chdk_exec_lua(PTPParams* params, char *script, uint32_t *ret)
 uint16_t
 ptp_chdk_get_script_output(PTPParams* params, char** scriptoutput) {
 	PTPContainer ptp;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_CHDK;
 	ptp.Nparam=1;
@@ -3137,119 +3730,119 @@ ptp_chdk_get_script_output(PTPParams* params, char** scriptoutput) {
 
 #if 0
 void ptp_chdk_opendir(char *dir, PTPParams* params, PTPDeviceInfo* deviceinfo){
-  uint16_t ret;
-  PTPContainer ptp;
-
-  PTP_CNT_INIT(ptp);
-  ptp.Code=PTP_OC_CHDK;
-  ptp.Nparam=1;
-  ptp.Param1=PTP_CHDK_OpenDir;
-  ret=ptp_transaction(params, &ptp, PTP_DP_SENDDATA, strlen(dir)+1, (char*)&dir);
-  if ( ret != 0x2001 )
-  {
-    ptp_error(params,"unexpected return code 0x%x",ret);
-    return;
-  }
+    uint16_t ret;
+    PTPContainer ptp;
+    
+    PTP_CNT_INIT(ptp);
+    ptp.Code=PTP_OC_CHDK;
+    ptp.Nparam=1;
+    ptp.Param1=PTP_CHDK_OpenDir;
+    ret=ptp_transaction(params, &ptp, PTP_DP_SENDDATA, strlen(dir)+1, (char*)&dir);
+    if ( ret != 0x2001 )
+    {
+        ptp_error(params,"unexpected return code 0x%x",ret);
+        return;
+    }
 }
 
 void ptp_chdk_closedir(PTPParams* params, PTPDeviceInfo* deviceinfo){
-  uint16_t ret;
-  PTPContainer ptp;
-
-  PTP_CNT_INIT(ptp);
-  ptp.Code=PTP_OC_CHDK;
-  ptp.Nparam=1;
-  ptp.Param1=PTP_CHDK_CloseDir;
-  ret=ptp_transaction(params, &ptp, PTP_DP_NODATA, 0, NULL);
-  if ( ret != 0x2001 )
-  {
-    ptp_error(params,"unexpected return code 0x%x",ret);
-    return;
-  }
+    uint16_t ret;
+    PTPContainer ptp;
+    
+    PTP_CNT_INIT(ptp);
+    ptp.Code=PTP_OC_CHDK;
+    ptp.Nparam=1;
+    ptp.Param1=PTP_CHDK_CloseDir;
+    ret=ptp_transaction(params, &ptp, PTP_DP_NODATA, 0, NULL);
+    if ( ret != 0x2001 )
+    {
+        ptp_error(params,"unexpected return code 0x%x",ret);
+        return;
+    }
 }
 
 struct fileinfo* ptp_chdk_readdir(PTPParams* params, PTPDeviceInfo* deviceinfo){
-  uint16_t ret;
-  PTPContainer ptp;
-  char* buf=NULL;
-  static struct fileinfo fi;
-
-  PTP_CNT_INIT(ptp);
-  ptp.Code=PTP_OC_CHDK;
-  ptp.Nparam=1;
-  ptp.Param1=PTP_CHDK_ReadDir;
-  ret=ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, &buf);
-  if ( ret != 0x2001 )
-  {
-    ptp_error(params,"unexpected return code 0x%x",ret);
-    return NULL;
-  }
-  if (buf){
-   memcpy(&fi, buf, sizeof(fi));
-   free(buf);
-  }
-
-  return &fi;
-
+    uint16_t ret;
+    PTPContainer ptp;
+    char* buf=NULL;
+    static struct fileinfo fi;
+    
+    PTP_CNT_INIT(ptp);
+    ptp.Code=PTP_OC_CHDK;
+    ptp.Nparam=1;
+    ptp.Param1=PTP_CHDK_ReadDir;
+    ret=ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, &buf);
+    if ( ret != 0x2001 )
+    {
+        ptp_error(params,"unexpected return code 0x%x",ret);
+        return NULL;
+    }
+    if (buf){
+        memcpy(&fi, buf, sizeof(fi));
+        free(buf);
+    }
+    
+    return &fi;
+    
 }
 
 void ptp_chdk_download_alt_end(PTPParams* params, PTPDeviceInfo* deviceinfo){ // internal use
-  uint16_t ret;
-  PTPContainer ptp;
-  PTP_CNT_INIT(ptp);
-  ptp.Code=PTP_OC_CHDK;
-  ptp.Nparam=1;
-  ptp.Param1=PTP_CHDK_EndDownloadFile;
-  ret=ptp_transaction(params, &ptp, PTP_DP_NODATA, 0, NULL);
-  if ( ret != 0x2001 ) ptp_error(params,"unexpected return code 0x%x",ret);
+    uint16_t ret;
+    PTPContainer ptp;
+    PTP_CNT_INIT(ptp);
+    ptp.Code=PTP_OC_CHDK;
+    ptp.Nparam=1;
+    ptp.Param1=PTP_CHDK_EndDownloadFile;
+    ret=ptp_transaction(params, &ptp, PTP_DP_NODATA, 0, NULL);
+    if ( ret != 0x2001 ) ptp_error(params,"unexpected return code 0x%x",ret);
 }
 
 int ptp_chdk_download_alt(char *remote_fn, char *local_fn, PTPParams* params, PTPDeviceInfo* deviceinfo)
 {
-  uint16_t ret;
-  PTPContainer ptp;
-  char *buf = NULL;
-  FILE *f;
-
-  PTP_CNT_INIT(ptp);
-  ptp.Code=PTP_OC_CHDK;
-  ptp.Nparam=1;
-  ptp.Param1=PTP_CHDK_StartDownloadFile;
-  ret=ptp_transaction(params, &ptp, PTP_DP_SENDDATA, strlen(remote_fn)+1, &remote_fn);
-  if ( ret != 0x2001 )
-  {
-    ptp_error(params,"unexpected return code 0x%x",ret);
-    return 0;
-  }
-  f = fopen(local_fn,"wb");
-  if ( f == NULL )
-  {
-    ptp_error(params,"could not open file \'%s\'",local_fn);
-    return 0;
-  }
-
-  while(1) {
-   PTP_CNT_INIT(ptp);
-   ptp.Code=PTP_OC_CHDK;
-   ptp.Nparam=1;
-   ptp.Param1=PTP_CHDK_ResumeDownloadFile;
-   buf=NULL;
-   ret=ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, &buf);
-   if ( ret != 0x2001 )
-   {
-     ptp_error(params,"unexpected return code 0x%x",ret);
-     ptp_chdk_download_alt_end(params, deviceinfo);
-     fclose(f);
-     return 0;
-   }
-
-   if (ptp.Param1<=0){free(buf); break;}
-   fwrite(buf, 1, ptp.Param1, f);
-   free(buf);
-  }
-  fclose(f);
-  ptp_chdk_download_alt_end(params, deviceinfo);
-  return 1;
+    uint16_t ret;
+    PTPContainer ptp;
+    char *buf = NULL;
+    FILE *f;
+    
+    PTP_CNT_INIT(ptp);
+    ptp.Code=PTP_OC_CHDK;
+    ptp.Nparam=1;
+    ptp.Param1=PTP_CHDK_StartDownloadFile;
+    ret=ptp_transaction(params, &ptp, PTP_DP_SENDDATA, strlen(remote_fn)+1, &remote_fn);
+    if ( ret != 0x2001 )
+    {
+        ptp_error(params,"unexpected return code 0x%x",ret);
+        return 0;
+    }
+    f = fopen(local_fn,"wb");
+    if ( f == NULL )
+    {
+        ptp_error(params,"could not open file \'%s\'",local_fn);
+        return 0;
+    }
+    
+    while(1) {
+        PTP_CNT_INIT(ptp);
+        ptp.Code=PTP_OC_CHDK;
+        ptp.Nparam=1;
+        ptp.Param1=PTP_CHDK_ResumeDownloadFile;
+        buf=NULL;
+        ret=ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, &buf);
+        if ( ret != 0x2001 )
+        {
+            ptp_error(params,"unexpected return code 0x%x",ret);
+            ptp_chdk_download_alt_end(params, deviceinfo);
+            fclose(f);
+            return 0;
+        }
+        
+        if (ptp.Param1<=0){free(buf); break;}
+        fwrite(buf, 1, ptp.Param1, f);
+        free(buf);
+    }
+    fclose(f);
+    ptp_chdk_download_alt_end(params, deviceinfo);
+    return 1;
 }
 #endif
 
@@ -3259,7 +3852,7 @@ ptp_chdk_get_video_settings(PTPParams* params, ptp_chdk_videosettings* vsettings
 	uint16_t ret;
 	PTPContainer ptp;
 	unsigned char* buf=NULL;
-
+    
 	PTP_CNT_INIT(ptp);
 	ptp.Code=PTP_OC_CHDK;
 	ptp.Nparam=1;
@@ -3276,6 +3869,71 @@ ptp_chdk_get_video_settings(PTPParams* params, ptp_chdk_videosettings* vsettings
 }
 
 
+/**
+ * Android MTP Extensions
+ */
+
+/**
+ * ptp_android_getpartialobject64:
+ * params:	PTPParams*
+ *		handle			- Object handle
+ *		offset			- Offset into object
+ *		maxbytes		- Maximum of bytes to read
+ *		object			- pointer to data area
+ *		len			- pointer to returned length
+ *
+ * Get object 'handle' from device and store the data in newly
+ * allocated 'object'. Start from offset and read at most maxbytes.
+ *
+ * This is a 64bit offset version of the standard GetPartialObject.
+ *
+ * Return values: Some PTP_RC_* code.
+ **/
+uint16_t
+ptp_android_getpartialobject64 (PTPParams* params, uint32_t handle, uint64_t offset,
+                                uint32_t maxbytes, unsigned char** object,
+                                uint32_t *len)
+{
+	PTPContainer ptp;
+    
+	PTP_CNT_INIT(ptp);
+	ptp.Code=PTP_OC_ANDROID_GetPartialObject64;
+	ptp.Param1=handle;
+	ptp.Param2=offset & 0xFFFFFFFF;
+	ptp.Param3=offset >> 32;
+	ptp.Param4=maxbytes;
+	ptp.Nparam=4;
+	*len=0;
+	return ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, object, len);
+}
+
+uint16_t
+ptp_android_sendpartialobject (PTPParams* params, uint32_t handle, uint64_t offset,
+                               unsigned char* object,	uint32_t len)
+{
+	uint32_t err;
+	PTPContainer ptp;
+    
+	PTP_CNT_INIT(ptp);
+	ptp.Code=PTP_OC_ANDROID_SendPartialObject;
+	ptp.Param1=handle;
+	ptp.Param2=offset & 0xFFFFFFFF;
+	ptp.Param3=offset >> 32;
+	ptp.Param4=len;
+	ptp.Nparam=4;
+    
+	/*
+	 * MtpServer.cpp is buggy: it uses write() without offset
+	 * rather than pwrite to send the data for data coming with
+	 * the header packet
+	 */
+	params->split_header_data = 1;
+	err=ptp_transaction(params, &ptp, PTP_DP_SENDDATA, len, &object, NULL);
+	params->split_header_data = 0;
+    
+	return err;
+}
+
 
 /* Non PTP protocol functions */
 /* devinfo testing functions */
@@ -3283,8 +3941,8 @@ ptp_chdk_get_video_settings(PTPParams* params, ptp_chdk_videosettings* vsettings
 int
 ptp_event_issupported(PTPParams* params, uint16_t event)
 {
-	int i=0;
-
+	unsigned int i=0;
+    
 	for (;i<params->deviceinfo.EventsSupported_len;i++) {
 		if (params->deviceinfo.EventsSupported[i]==event)
 			return 1;
@@ -3296,110 +3954,28 @@ ptp_event_issupported(PTPParams* params, uint16_t event)
 int
 ptp_property_issupported(PTPParams* params, uint16_t property)
 {
-	int i;
-
+	unsigned int i;
+    
 	for (i=0;i<params->deviceinfo.DevicePropertiesSupported_len;i++)
 		if (params->deviceinfo.DevicePropertiesSupported[i]==property)
 			return 1;
 	return 0;
 }
 
-/* ptp structures freeing functions */
-void
-ptp_free_devicepropvalue(uint16_t dt, PTPPropertyValue* dpd) {
-	switch (dt) {
-	case PTP_DTC_INT8:	case PTP_DTC_UINT8:
-	case PTP_DTC_UINT16:	case PTP_DTC_INT16:
-	case PTP_DTC_UINT32:	case PTP_DTC_INT32:
-	case PTP_DTC_UINT64:	case PTP_DTC_INT64:
-	case PTP_DTC_UINT128:	case PTP_DTC_INT128:
-		/* Nothing to free */
-		break;
-	case PTP_DTC_AINT8:	case PTP_DTC_AUINT8:
-	case PTP_DTC_AUINT16:	case PTP_DTC_AINT16:
-	case PTP_DTC_AUINT32:	case PTP_DTC_AINT32:
-	case PTP_DTC_AUINT64:	case PTP_DTC_AINT64:
-	case PTP_DTC_AUINT128:	case PTP_DTC_AINT128:
-		if (dpd->a.v)
-			free(dpd->a.v);
-		break;
-	case PTP_DTC_STR:
-		if (dpd->str)
-			free(dpd->str);
-		break;
-	}
-}
-
-void
-ptp_free_devicepropdesc(PTPDevicePropDesc* dpd)
-{
-	uint16_t i;
-
-	ptp_free_devicepropvalue (dpd->DataType, &dpd->FactoryDefaultValue);
-	ptp_free_devicepropvalue (dpd->DataType, &dpd->CurrentValue);
-	switch (dpd->FormFlag) {
-	case PTP_DPFF_Range:
-		ptp_free_devicepropvalue (dpd->DataType, &dpd->FORM.Range.MinimumValue);
-		ptp_free_devicepropvalue (dpd->DataType, &dpd->FORM.Range.MaximumValue);
-		ptp_free_devicepropvalue (dpd->DataType, &dpd->FORM.Range.StepSize);
-		break;
-	case PTP_DPFF_Enumeration:
-		if (dpd->FORM.Enum.SupportedValue) {
-			for (i=0;i<dpd->FORM.Enum.NumberOfValues;i++)
-				ptp_free_devicepropvalue (dpd->DataType, dpd->FORM.Enum.SupportedValue+i);
-			free (dpd->FORM.Enum.SupportedValue);
-		}
-	}
-}
-
-void
-ptp_free_objectpropdesc(PTPObjectPropDesc* opd)
-{
-	uint16_t i;
-
-	ptp_free_devicepropvalue (opd->DataType, &opd->FactoryDefaultValue);
-	switch (opd->FormFlag) {
-	case PTP_OPFF_None:
-		break;
-	case PTP_OPFF_Range:
-		ptp_free_devicepropvalue (opd->DataType, &opd->FORM.Range.MinimumValue);
-		ptp_free_devicepropvalue (opd->DataType, &opd->FORM.Range.MaximumValue);
-		ptp_free_devicepropvalue (opd->DataType, &opd->FORM.Range.StepSize);
-		break;
-	case PTP_OPFF_Enumeration:
-		if (opd->FORM.Enum.SupportedValue) {
-			for (i=0;i<opd->FORM.Enum.NumberOfValues;i++)
-				ptp_free_devicepropvalue (opd->DataType, opd->FORM.Enum.SupportedValue+i);
-			free (opd->FORM.Enum.SupportedValue);
-		}
-		break;
-	case PTP_OPFF_DateTime:
-	case PTP_OPFF_FixedLengthArray:
-	case PTP_OPFF_RegularExpression:
-	case PTP_OPFF_ByteArray:
-	case PTP_OPFF_LongString:
-		/* Ignore these presently, we cannot unpack them, so there is nothing to be freed. */
-		break;
-	default:
-		fprintf (stderr, "Unknown OPFF type %d\n", opd->FormFlag);
-		break;
-	}
-}
-
 void
 ptp_free_objectinfo (PTPObjectInfo *oi)
 {
 	if (!oi) return;
-        free (oi->Filename); oi->Filename = NULL;
-        free (oi->Keywords); oi->Keywords = NULL;
+    free (oi->Filename); oi->Filename = NULL;
+    free (oi->Keywords); oi->Keywords = NULL;
 }
 
 void
 ptp_free_object (PTPObject *ob)
 {
-	int i;
+	unsigned int i;
 	if (!ob) return;
-
+    
 	ptp_free_objectinfo (&ob->oi);
 	for (i=0;i<ob->nrofmtpprops;i++)
 		ptp_destroy_object_prop(&ob->mtpprops[i]);
@@ -3408,60 +3984,60 @@ ptp_free_object (PTPObject *ob)
 
 const char *
 ptp_strerror(uint16_t error) {
-
+    
 	int i;
 	/* PTP error descriptions */
 	static struct {
 		short n;
 		const char *txt;
 	} ptp_errors[] = {
-	{PTP_RC_Undefined, 		N_("PTP: Undefined Error")},
-	{PTP_RC_OK, 			N_("PTP: OK!")},
-	{PTP_RC_GeneralError, 		N_("PTP: General Error")},
-	{PTP_RC_SessionNotOpen, 	N_("PTP: Session Not Open")},
-	{PTP_RC_InvalidTransactionID, 	N_("PTP: Invalid Transaction ID")},
-	{PTP_RC_OperationNotSupported, 	N_("PTP: Operation Not Supported")},
-	{PTP_RC_ParameterNotSupported, 	N_("PTP: Parameter Not Supported")},
-	{PTP_RC_IncompleteTransfer, 	N_("PTP: Incomplete Transfer")},
-	{PTP_RC_InvalidStorageId, 	N_("PTP: Invalid Storage ID")},
-	{PTP_RC_InvalidObjectHandle, 	N_("PTP: Invalid Object Handle")},
-	{PTP_RC_DevicePropNotSupported, N_("PTP: Device Prop Not Supported")},
-	{PTP_RC_InvalidObjectFormatCode, N_("PTP: Invalid Object Format Code")},
-	{PTP_RC_StoreFull, 		N_("PTP: Store Full")},
-	{PTP_RC_ObjectWriteProtected, 	N_("PTP: Object Write Protected")},
-	{PTP_RC_StoreReadOnly, 		N_("PTP: Store Read Only")},
-	{PTP_RC_AccessDenied,		N_("PTP: Access Denied")},
-	{PTP_RC_NoThumbnailPresent, 	N_("PTP: No Thumbnail Present")},
-	{PTP_RC_SelfTestFailed, 	N_("PTP: Self Test Failed")},
-	{PTP_RC_PartialDeletion, 	N_("PTP: Partial Deletion")},
-	{PTP_RC_StoreNotAvailable, 	N_("PTP: Store Not Available")},
-	{PTP_RC_SpecificationByFormatUnsupported,
-				N_("PTP: Specification By Format Unsupported")},
-	{PTP_RC_NoValidObjectInfo, 	N_("PTP: No Valid Object Info")},
-	{PTP_RC_InvalidCodeFormat, 	N_("PTP: Invalid Code Format")},
-	{PTP_RC_UnknownVendorCode, 	N_("PTP: Unknown Vendor Code")},
-	{PTP_RC_CaptureAlreadyTerminated,
-					N_("PTP: Capture Already Terminated")},
-	{PTP_RC_DeviceBusy, 		N_("PTP: Device Busy")},
-	{PTP_RC_InvalidParentObject, 	N_("PTP: Invalid Parent Object")},
-	{PTP_RC_InvalidDevicePropFormat, N_("PTP: Invalid Device Prop Format")},
-	{PTP_RC_InvalidDevicePropValue, N_("PTP: Invalid Device Prop Value")},
-	{PTP_RC_InvalidParameter, 	N_("PTP: Invalid Parameter")},
-	{PTP_RC_SessionAlreadyOpened, 	N_("PTP: Session Already Opened")},
-	{PTP_RC_TransactionCanceled, 	N_("PTP: Transaction Canceled")},
-	{PTP_RC_SpecificationOfDestinationUnsupported,
+        {PTP_RC_Undefined, 		N_("PTP: Undefined Error")},
+        {PTP_RC_OK, 			N_("PTP: OK!")},
+        {PTP_RC_GeneralError, 		N_("PTP: General Error")},
+        {PTP_RC_SessionNotOpen, 	N_("PTP: Session Not Open")},
+        {PTP_RC_InvalidTransactionID, 	N_("PTP: Invalid Transaction ID")},
+        {PTP_RC_OperationNotSupported, 	N_("PTP: Operation Not Supported")},
+        {PTP_RC_ParameterNotSupported, 	N_("PTP: Parameter Not Supported")},
+        {PTP_RC_IncompleteTransfer, 	N_("PTP: Incomplete Transfer")},
+        {PTP_RC_InvalidStorageId, 	N_("PTP: Invalid Storage ID")},
+        {PTP_RC_InvalidObjectHandle, 	N_("PTP: Invalid Object Handle")},
+        {PTP_RC_DevicePropNotSupported, N_("PTP: Device Prop Not Supported")},
+        {PTP_RC_InvalidObjectFormatCode, N_("PTP: Invalid Object Format Code")},
+        {PTP_RC_StoreFull, 		N_("PTP: Store Full")},
+        {PTP_RC_ObjectWriteProtected, 	N_("PTP: Object Write Protected")},
+        {PTP_RC_StoreReadOnly, 		N_("PTP: Store Read Only")},
+        {PTP_RC_AccessDenied,		N_("PTP: Access Denied")},
+        {PTP_RC_NoThumbnailPresent, 	N_("PTP: No Thumbnail Present")},
+        {PTP_RC_SelfTestFailed, 	N_("PTP: Self Test Failed")},
+        {PTP_RC_PartialDeletion, 	N_("PTP: Partial Deletion")},
+        {PTP_RC_StoreNotAvailable, 	N_("PTP: Store Not Available")},
+        {PTP_RC_SpecificationByFormatUnsupported,
+            N_("PTP: Specification By Format Unsupported")},
+        {PTP_RC_NoValidObjectInfo, 	N_("PTP: No Valid Object Info")},
+        {PTP_RC_InvalidCodeFormat, 	N_("PTP: Invalid Code Format")},
+        {PTP_RC_UnknownVendorCode, 	N_("PTP: Unknown Vendor Code")},
+        {PTP_RC_CaptureAlreadyTerminated,
+            N_("PTP: Capture Already Terminated")},
+        {PTP_RC_DeviceBusy, 		N_("PTP: Device Busy")},
+        {PTP_RC_InvalidParentObject, 	N_("PTP: Invalid Parent Object")},
+        {PTP_RC_InvalidDevicePropFormat, N_("PTP: Invalid Device Prop Format")},
+        {PTP_RC_InvalidDevicePropValue, N_("PTP: Invalid Device Prop Value")},
+        {PTP_RC_InvalidParameter, 	N_("PTP: Invalid Parameter")},
+        {PTP_RC_SessionAlreadyOpened, 	N_("PTP: Session Already Opened")},
+        {PTP_RC_TransactionCanceled, 	N_("PTP: Transaction Canceled")},
+        {PTP_RC_SpecificationOfDestinationUnsupported,
 			N_("PTP: Specification Of Destination Unsupported")},
-	{PTP_RC_EK_FilenameRequired,	N_("PTP: EK Filename Required")},
-	{PTP_RC_EK_FilenameConflicts,	N_("PTP: EK Filename Conflicts")},
-	{PTP_RC_EK_FilenameInvalid,	N_("PTP: EK Filename Invalid")},
-
-	{PTP_ERROR_IO,		  N_("PTP: I/O error")},
-	{PTP_ERROR_BADPARAM,	  N_("PTP: Error: bad parameter")},
-	{PTP_ERROR_DATA_EXPECTED, N_("PTP: Protocol error, data expected")},
-	{PTP_ERROR_RESP_EXPECTED, N_("PTP: Protocol error, response expected")},
-	{0, NULL}
-};
-
+        {PTP_RC_EK_FilenameRequired,	N_("PTP: EK Filename Required")},
+        {PTP_RC_EK_FilenameConflicts,	N_("PTP: EK Filename Conflicts")},
+        {PTP_RC_EK_FilenameInvalid,	N_("PTP: EK Filename Invalid")},
+        
+        {PTP_ERROR_IO,		  N_("PTP: I/O error")},
+        {PTP_ERROR_BADPARAM,	  N_("PTP: Error: bad parameter")},
+        {PTP_ERROR_DATA_EXPECTED, N_("PTP: Protocol error, data expected")},
+        {PTP_ERROR_RESP_EXPECTED, N_("PTP: Protocol error, response expected")},
+        {0, NULL}
+    };
+    
 	for (i=0; ptp_errors[i].txt!=NULL; i++)
 		if (ptp_errors[i].n == error)
 			return ptp_errors[i].txt;
@@ -3500,9 +4076,9 @@ ptp_get_property_description(PTPParams* params, uint16_t dpc)
 		{PTP_DPC_ExposureTime,		N_("Exposure Time")},
 		{PTP_DPC_ExposureProgramMode,	N_("Exposure Program Mode")},
 		{PTP_DPC_ExposureIndex,
-					N_("Exposure Index (film speed ISO)")},
+            N_("Exposure Index (film speed ISO)")},
 		{PTP_DPC_ExposureBiasCompensation,
-					N_("Exposure Bias Compensation")},
+            N_("Exposure Bias Compensation")},
 		{PTP_DPC_DateTime,		N_("Date & Time")},
 		{PTP_DPC_CaptureDelay,		N_("Pre-Capture Delay")},
 		{PTP_DPC_StillCaptureMode,	N_("Still Capture Mode")},
@@ -3526,14 +4102,14 @@ ptp_get_property_description(PTPParams* params, uint16_t dpc)
 	} ptp_device_properties_EK[] = {
 		{PTP_DPC_EK_ColorTemperature,	N_("Color Temperature")},
 		{PTP_DPC_EK_DateTimeStampFormat,
-					N_("Date Time Stamp Format")},
+            N_("Date Time Stamp Format")},
 		{PTP_DPC_EK_BeepMode,		N_("Beep Mode")},
 		{PTP_DPC_EK_VideoOut,		N_("Video Out")},
 		{PTP_DPC_EK_PowerSaving,	N_("Power Saving")},
 		{PTP_DPC_EK_UI_Language,	N_("UI Language")},
 		{0,NULL}
 	};
-
+    
 	struct {
 		uint16_t dpc;
 		const char *txt;
@@ -3612,488 +4188,510 @@ ptp_get_property_description(PTPParams* params, uint16_t dpc)
 		{PTP_DPC_CANON_ModelID,		N_("Model ID")},
 		{0,NULL}
 	};
-
+    
 	struct {
 		uint16_t dpc;
 		const char *txt;
 	} ptp_device_properties_Nikon[] = {
 		{PTP_DPC_NIKON_ShootingBank, 			/* 0xD010 */
-		 N_("Shooting Bank")},
+            N_("Shooting Bank")},
 		{PTP_DPC_NIKON_ShootingBankNameA,		/* 0xD011 */
-		 N_("Shooting Bank Name A")},
+            N_("Shooting Bank Name A")},
 		{PTP_DPC_NIKON_ShootingBankNameB,		/* 0xD012 */
-		 N_("Shooting Bank Name B")},
+            N_("Shooting Bank Name B")},
 		{PTP_DPC_NIKON_ShootingBankNameC,		/* 0xD013 */
-		 N_("Shooting Bank Name C")},
+            N_("Shooting Bank Name C")},
 		{PTP_DPC_NIKON_ShootingBankNameD,		/* 0xD014 */
-		 N_("Shooting Bank Name D")},
+            N_("Shooting Bank Name D")},
 		{PTP_DPC_NIKON_ResetBank0,			/* 0xD015 */
-		 N_("Reset Bank 0")},
+            N_("Reset Bank 0")},
 		{PTP_DPC_NIKON_RawCompression,			/* 0xD016 */
-		 N_("Raw Compression")},
+            N_("Raw Compression")},
 		{PTP_DPC_NIKON_WhiteBalanceAutoBias,		/* 0xD017 */
-		 N_("Auto White Balance Bias")},
+            N_("Auto White Balance Bias")},
 		{PTP_DPC_NIKON_WhiteBalanceTungstenBias,	/* 0xD018 */
-		 N_("Tungsten White Balance Bias")},
+            N_("Tungsten White Balance Bias")},
 		{PTP_DPC_NIKON_WhiteBalanceFluorescentBias,	/* 0xD019 */
-		 N_("Fluorescent White Balance Bias")},
+            N_("Fluorescent White Balance Bias")},
 		{PTP_DPC_NIKON_WhiteBalanceDaylightBias,	/* 0xD01a */
-		 N_("Daylight White Balance Bias")},
+            N_("Daylight White Balance Bias")},
 		{PTP_DPC_NIKON_WhiteBalanceFlashBias,		/* 0xD01b */
-		 N_("Flash White Balance Bias")},
+            N_("Flash White Balance Bias")},
 		{PTP_DPC_NIKON_WhiteBalanceCloudyBias,		/* 0xD01c */
-		 N_("Cloudy White Balance Bias")},
+            N_("Cloudy White Balance Bias")},
 		{PTP_DPC_NIKON_WhiteBalanceShadeBias,		/* 0xD01d */
-		 N_("Shady White Balance Bias")},
+            N_("Shady White Balance Bias")},
 		{PTP_DPC_NIKON_WhiteBalanceColorTemperature,	/* 0xD01e */
-		 N_("White Balance Colour Temperature")},
+            N_("White Balance Colour Temperature")},
 		{PTP_DPC_NIKON_WhiteBalancePresetNo,		/* 0xD01f */
-		 N_("White Balance Preset Number")},
+            N_("White Balance Preset Number")},
 		{PTP_DPC_NIKON_WhiteBalancePresetName0,		/* 0xD020 */
-		 N_("White Balance Preset Name 0")},
+            N_("White Balance Preset Name 0")},
 		{PTP_DPC_NIKON_WhiteBalancePresetName1,		/* 0xD021 */
-		 N_("White Balance Preset Name 1")},
+            N_("White Balance Preset Name 1")},
 		{PTP_DPC_NIKON_WhiteBalancePresetName2,		/* 0xD022 */
-		 N_("White Balance Preset Name 2")},
+            N_("White Balance Preset Name 2")},
 		{PTP_DPC_NIKON_WhiteBalancePresetName3,		/* 0xD023 */
-		 N_("White Balance Preset Name 3")},
+            N_("White Balance Preset Name 3")},
 		{PTP_DPC_NIKON_WhiteBalancePresetName4,		/* 0xD024 */
-		 N_("White Balance Preset Name 4")},
+            N_("White Balance Preset Name 4")},
 		{PTP_DPC_NIKON_WhiteBalancePresetVal0,		/* 0xD025 */
-		 N_("White Balance Preset Value 0")},
+            N_("White Balance Preset Value 0")},
 		{PTP_DPC_NIKON_WhiteBalancePresetVal1,		/* 0xD026 */
-		 N_("White Balance Preset Value 1")},
+            N_("White Balance Preset Value 1")},
 		{PTP_DPC_NIKON_WhiteBalancePresetVal2,		/* 0xD027 */
-		 N_("White Balance Preset Value 2")},
+            N_("White Balance Preset Value 2")},
 		{PTP_DPC_NIKON_WhiteBalancePresetVal3,		/* 0xD028 */
-		 N_("White Balance Preset Value 3")},
+            N_("White Balance Preset Value 3")},
 		{PTP_DPC_NIKON_WhiteBalancePresetVal4,		/* 0xD029 */
-		 N_("White Balance Preset Value 4")},
+            N_("White Balance Preset Value 4")},
 		{PTP_DPC_NIKON_ImageSharpening,			/* 0xD02a */
-		 N_("Sharpening")},
+            N_("Sharpening")},
 		{PTP_DPC_NIKON_ToneCompensation,		/* 0xD02b */
-		 N_("Tone Compensation")},
+            N_("Tone Compensation")},
 		{PTP_DPC_NIKON_ColorModel,			/* 0xD02c */
-		 N_("Color Model")},
+            N_("Color Model")},
 		{PTP_DPC_NIKON_HueAdjustment,			/* 0xD02d */
-		 N_("Hue Adjustment")},
+            N_("Hue Adjustment")},
 		{PTP_DPC_NIKON_NonCPULensDataFocalLength,	/* 0xD02e */
-		 N_("Lens Focal Length (Non CPU)")},
+            N_("Lens Focal Length (Non CPU)")},
 		{PTP_DPC_NIKON_NonCPULensDataMaximumAperture,	/* 0xD02f */
-		 N_("Lens Maximum Aperture (Non CPU)")},
+            N_("Lens Maximum Aperture (Non CPU)")},
 		{PTP_DPC_NIKON_ShootingMode,			/* 0xD030 */
-		 N_("Shooting Mode")},
+            N_("Shooting Mode")},
 		{PTP_DPC_NIKON_JPEG_Compression_Policy,		/* 0xD031 */
-		 N_("JPEG Compression Policy")},
+            N_("JPEG Compression Policy")},
 		{PTP_DPC_NIKON_ColorSpace,			/* 0xD032 */
-		 N_("Color Space")},
+            N_("Color Space")},
 		{PTP_DPC_NIKON_AutoDXCrop,			/* 0xD033 */
-		 N_("Auto DX Crop")},
+            N_("Auto DX Crop")},
+		{PTP_DPC_NIKON_FlickerReduction,		/* 0xD034 */
+            N_("Flicker Reduction")},
+		{PTP_DPC_NIKON_RemoteMode,			/* 0xD035 */
+            N_("Remote Mode")},
+		{PTP_DPC_NIKON_VideoMode,			/* 0xD036 */
+            N_("Video Mode")},
+		{PTP_DPC_NIKON_EffectMode,			/* 0xD037 */
+            N_("Effect Mode")},
 		{PTP_DPC_NIKON_CSMMenuBankSelect,		/* 0xD040 */
-		 "PTP_DPC_NIKON_CSMMenuBankSelect"},
+            "PTP_DPC_NIKON_CSMMenuBankSelect"},
 		{PTP_DPC_NIKON_MenuBankNameA,			/* 0xD041 */
-		 N_("Menu Bank Name A")},
+            N_("Menu Bank Name A")},
 		{PTP_DPC_NIKON_MenuBankNameB,			/* 0xD042 */
-		 N_("Menu Bank Name B")},
+            N_("Menu Bank Name B")},
 		{PTP_DPC_NIKON_MenuBankNameC,			/* 0xD043 */
-		 N_("Menu Bank Name C")},
+            N_("Menu Bank Name C")},
 		{PTP_DPC_NIKON_MenuBankNameD,			/* 0xD044 */
-		 N_("Menu Bank Name D")},
+            N_("Menu Bank Name D")},
 		{PTP_DPC_NIKON_ResetBank,			/* 0xD045 */
-		 N_("Reset Menu Bank")},
+            N_("Reset Menu Bank")},
 		{PTP_DPC_NIKON_A1AFCModePriority,		/* 0xD048 */
-		 "PTP_DPC_NIKON_A1AFCModePriority"},
+            "PTP_DPC_NIKON_A1AFCModePriority"},
 		{PTP_DPC_NIKON_A2AFSModePriority,		/* 0xD049 */
-		 "PTP_DPC_NIKON_A2AFSModePriority"},
+            "PTP_DPC_NIKON_A2AFSModePriority"},
 		{PTP_DPC_NIKON_A3GroupDynamicAF,		/* 0xD04a */
-		 "PTP_DPC_NIKON_A3GroupDynamicAF"},
+            "PTP_DPC_NIKON_A3GroupDynamicAF"},
 		{PTP_DPC_NIKON_A4AFActivation,			/* 0xD04b */
-		 "PTP_DPC_NIKON_A4AFActivation"},
+            "PTP_DPC_NIKON_A4AFActivation"},
 		{PTP_DPC_NIKON_FocusAreaIllumManualFocus,	/* 0xD04c */
-		 "PTP_DPC_NIKON_FocusAreaIllumManualFocus"},
+            "PTP_DPC_NIKON_FocusAreaIllumManualFocus"},
 		{PTP_DPC_NIKON_FocusAreaIllumContinuous,	/* 0xD04d */
-		 "PTP_DPC_NIKON_FocusAreaIllumContinuous"},
+            "PTP_DPC_NIKON_FocusAreaIllumContinuous"},
 		{PTP_DPC_NIKON_FocusAreaIllumWhenSelected,	/* 0xD04e */
-		 "PTP_DPC_NIKON_FocusAreaIllumWhenSelected"},
+            "PTP_DPC_NIKON_FocusAreaIllumWhenSelected"},
 		{PTP_DPC_NIKON_FocusAreaWrap,			/* 0xD04f */
-		 N_("Focus Area Wrap")},
+            N_("Focus Area Wrap")},
 		{PTP_DPC_NIKON_VerticalAFON,			/* 0xD050 */
-		 N_("Vertical AF On")},
+            N_("Vertical AF On")},
 		{PTP_DPC_NIKON_AFLockOn,			/* 0xD051 */
-		 N_("AF Lock On")},
+            N_("AF Lock On")},
 		{PTP_DPC_NIKON_FocusAreaZone,			/* 0xD052 */
-		 N_("Focus Area Zone")},
+            N_("Focus Area Zone")},
 		{PTP_DPC_NIKON_EnableCopyright,			/* 0xD053 */
-		 N_("Enable Copyright")},
+            N_("Enable Copyright")},
 		{PTP_DPC_NIKON_ISOAuto,				/* 0xD054 */
-		 N_("Auto ISO")},
+            N_("Auto ISO")},
 		{PTP_DPC_NIKON_EVISOStep,			/* 0xD055 */
-		 N_("Exposure ISO Step")},
+            N_("Exposure ISO Step")},
 		{PTP_DPC_NIKON_EVStep,				/* 0xD056 */
-		 N_("Exposure Step")},
+            N_("Exposure Step")},
 		{PTP_DPC_NIKON_EVStepExposureComp,		/* 0xD057 */
-		 N_("Exposure Compensation (EV)")},
+            N_("Exposure Compensation (EV)")},
 		{PTP_DPC_NIKON_ExposureCompensation,		/* 0xD058 */
-		 N_("Exposure Compensation")},
+            N_("Exposure Compensation")},
 		{PTP_DPC_NIKON_CenterWeightArea,		/* 0xD059 */
-		 N_("Centre Weight Area")},
+            N_("Centre Weight Area")},
 		{PTP_DPC_NIKON_ExposureBaseMatrix,		/* 0xD05A */
-		 N_("Exposure Base Matrix")},
+            N_("Exposure Base Matrix")},
 		{PTP_DPC_NIKON_ExposureBaseCenter,		/* 0xD05B */
-		 N_("Exposure Base Center")},
+            N_("Exposure Base Center")},
 		{PTP_DPC_NIKON_ExposureBaseSpot,		/* 0xD05C */
-		 N_("Exposure Base Spot")},
+            N_("Exposure Base Spot")},
 		{PTP_DPC_NIKON_LiveViewAFArea,			/* 0xD05D */
-		 N_("Live View AF Area")},
+            N_("Live View AF Area")},
 		{PTP_DPC_NIKON_AELockMode,			/* 0xD05E */
-		 N_("Exposure Lock")},
+            N_("Exposure Lock")},
 		{PTP_DPC_NIKON_AELAFLMode,			/* 0xD05F */
-		 N_("Focus Lock")},
+            N_("Focus Lock")},
 		{PTP_DPC_NIKON_LiveViewAFFocus,			/* 0xD061 */
-		 N_("Live View AF Focus")},
+            N_("Live View AF Focus")},
 		{PTP_DPC_NIKON_MeterOff,			/* 0xD062 */
-		 N_("Auto Meter Off Time")},
+            N_("Auto Meter Off Time")},
 		{PTP_DPC_NIKON_SelfTimer,			/* 0xD063 */
-		 N_("Self Timer Delay")},
+            N_("Self Timer Delay")},
 		{PTP_DPC_NIKON_MonitorOff,			/* 0xD064 */
-		 N_("LCD Off Time")},
+            N_("LCD Off Time")},
 		{PTP_DPC_NIKON_ImgConfTime,			/* 0xD065 */
-		 N_("Img Conf Time")},
+            N_("Img Conf Time")},
 		{PTP_DPC_NIKON_AutoOffTimers,			/* 0xD066 */
-		 N_("Auto Off Timers")},
+            N_("Auto Off Timers")},
 		{PTP_DPC_NIKON_AngleLevel,			/* 0xD067 */
-		 N_("Angle Level")},
+            N_("Angle Level")},
 		{PTP_DPC_NIKON_D1ShootingSpeed,			/* 0xD068 */
-		 N_("Shooting Speed")},
+            N_("Shooting Speed")},
 		{PTP_DPC_NIKON_D2MaximumShots,			/* 0xD069 */
-		 N_("Maximum Shots")},
+            N_("Maximum Shots")},
 		{PTP_DPC_NIKON_ExposureDelayMode,		/* 0xD06A */
-		 N_("Exposure delay mode")},
+            N_("Exposure delay mode")},
 		{PTP_DPC_NIKON_LongExposureNoiseReduction,	/* 0xD06B */
-		 N_("Long Exposure Noise Reduction")},
+            N_("Long Exposure Noise Reduction")},
 		{PTP_DPC_NIKON_FileNumberSequence,		/* 0xD06C */
-		 N_("File Number Sequencing")},
+            N_("File Number Sequencing")},
 		{PTP_DPC_NIKON_ControlPanelFinderRearControl,	/* 0xD06D */
-		 "PTP_DPC_NIKON_ControlPanelFinderRearControl"},
+            "PTP_DPC_NIKON_ControlPanelFinderRearControl"},
 		{PTP_DPC_NIKON_ControlPanelFinderViewfinder,	/* 0xD06E */
-		 "PTP_DPC_NIKON_ControlPanelFinderViewfinder"},
+            "PTP_DPC_NIKON_ControlPanelFinderViewfinder"},
 		{PTP_DPC_NIKON_D7Illumination,			/* 0xD06F */
-		 N_("LCD Illumination")},
+            N_("LCD Illumination")},
 		{PTP_DPC_NIKON_NrHighISO,			/* 0xD070 */
-		 N_("High ISO noise reduction")},
+            N_("High ISO noise reduction")},
 		{PTP_DPC_NIKON_SHSET_CH_GUID_DISP,		/* 0xD071 */
-		 N_("On screen tips")},
+            N_("On screen tips")},
 		{PTP_DPC_NIKON_ArtistName,			/* 0xD072 */
-		 N_("Artist Name")},
+            N_("Artist Name")},
 		{PTP_DPC_NIKON_CopyrightInfo,			/* 0xD073 */
-		 N_("Copyright Information")},
+            N_("Copyright Information")},
 		{PTP_DPC_NIKON_FlashSyncSpeed,			/* 0xD074 */
-		 N_("Flash Sync. Speed")},
+            N_("Flash Sync. Speed")},
 		{PTP_DPC_NIKON_FlashShutterSpeed,		/* 0xD075 */
-		 N_("Flash Shutter Speed")},
+            N_("Flash Shutter Speed")},
 		{PTP_DPC_NIKON_E3AAFlashMode,			/* 0xD076 */
-		 N_("Flash Mode")},
+            N_("Flash Mode")},
 		{PTP_DPC_NIKON_E4ModelingFlash,			/* 0xD077 */
-		 N_("Modeling Flash")},
+            N_("Modeling Flash")},
 		{PTP_DPC_NIKON_BracketSet,			/* 0xD078 */
-		 N_("Bracket Set")},
+            N_("Bracket Set")},
 		{PTP_DPC_NIKON_E6ManualModeBracketing,		/* 0xD079 */
-		 N_("Manual Mode Bracketing")},
+            N_("Manual Mode Bracketing")},
 		{PTP_DPC_NIKON_BracketOrder,			/* 0xD07A */
-		 N_("Bracket Order")},
+            N_("Bracket Order")},
 		{PTP_DPC_NIKON_E8AutoBracketSelection,		/* 0xD07B */
-		 N_("Auto Bracket Selection")},
+            N_("Auto Bracket Selection")},
 		{PTP_DPC_NIKON_BracketingSet, N_("NIKON Auto Bracketing Set")},	/* 0xD07C */
 		{PTP_DPC_NIKON_F1CenterButtonShootingMode,	/* 0xD080 */
-		 N_("Center Button Shooting Mode")},
+            N_("Center Button Shooting Mode")},
 		{PTP_DPC_NIKON_CenterButtonPlaybackMode,	/* 0xD081 */
-		 N_("Center Button Playback Mode")},
+            N_("Center Button Playback Mode")},
 		{PTP_DPC_NIKON_F2Multiselector,			/* 0xD082 */
-		 N_("Multiselector")},
+            N_("Multiselector")},
 		{PTP_DPC_NIKON_F3PhotoInfoPlayback,		/* 0xD083 */
-		 N_("Photo Info. Playback")},
+            N_("Photo Info. Playback")},
 		{PTP_DPC_NIKON_F4AssignFuncButton,		/* 0xD084 */
-		 N_("Assign Func. Button")},
+            N_("Assign Func. Button")},
 		{PTP_DPC_NIKON_F5CustomizeCommDials,		/* 0xD085 */
-		 N_("Customise Command Dials")},
+            N_("Customise Command Dials")},
 		{PTP_DPC_NIKON_ReverseCommandDial,		/* 0xD086 */
-		 N_("Reverse Command Dial")},
+            N_("Reverse Command Dial")},
 		{PTP_DPC_NIKON_ApertureSetting,			/* 0xD087 */
-		 N_("Aperture Setting")},
+            N_("Aperture Setting")},
 		{PTP_DPC_NIKON_MenusAndPlayback,		/* 0xD088 */
-		 N_("Menus and Playback")},
+            N_("Menus and Playback")},
 		{PTP_DPC_NIKON_F6ButtonsAndDials,		/* 0xD089 */
-		 N_("Buttons and Dials")},
+            N_("Buttons and Dials")},
 		{PTP_DPC_NIKON_NoCFCard,			/* 0xD08A */
-		 N_("No CF Card Release")},
+            N_("No CF Card Release")},
 		{PTP_DPC_NIKON_CenterButtonZoomRatio,		/* 0xD08B */
-		 N_("Center Button Zoom Ratio")},
+            N_("Center Button Zoom Ratio")},
 		{PTP_DPC_NIKON_FunctionButton2,			/* 0xD08C */
-		 N_("Function Button 2")},
+            N_("Function Button 2")},
 		{PTP_DPC_NIKON_AFAreaPoint,			/* 0xD08D */
-		 N_("AF Area Point")},
+            N_("AF Area Point")},
 		{PTP_DPC_NIKON_NormalAFOn,			/* 0xD08E */
-		 N_("Normal AF On")},
+            N_("Normal AF On")},
+		{PTP_DPC_NIKON_CleanImageSensor,		/* 0xD08F */
+            N_("Clean Image Sensor")},
 		{PTP_DPC_NIKON_ImageCommentString,		/* 0xD090 */
-		 N_("Image Comment String")},
+            N_("Image Comment String")},
 		{PTP_DPC_NIKON_ImageCommentEnable,		/* 0xD091 */
-		 N_("Image Comment Enable")},
+            N_("Image Comment Enable")},
 		{PTP_DPC_NIKON_ImageRotation,			/* 0xD092 */
-		 N_("Image Rotation")},
+            N_("Image Rotation")},
 		{PTP_DPC_NIKON_ManualSetLensNo,			/* 0xD093 */
-		 N_("Manual Set Lens Number")},
+            N_("Manual Set Lens Number")},
 		{PTP_DPC_NIKON_MovScreenSize,			/* 0xD0A0 */
-		 N_("Movie Screen Size")},
+            N_("Movie Screen Size")},
 		{PTP_DPC_NIKON_MovVoice,			/* 0xD0A1 */
-		 N_("Movie Voice")},
+            N_("Movie Voice")},
+		{PTP_DPC_NIKON_MovMicrophone,			/* 0xD0A2 */
+            N_("Movie Microphone")},
+		{PTP_DPC_NIKON_MovFileSlot,			/* 0xD0A3 */
+            N_("Movie Card Slot")},
+		{PTP_DPC_NIKON_ManualMovieSetting,		/* 0xD0A6 */
+            N_("Manual Movie Setting")},
+		{PTP_DPC_NIKON_MonitorOffDelay,			/* 0xD0B3 */
+            N_("Monitor Off Delay")},
 		{PTP_DPC_NIKON_Bracketing,			/* 0xD0C0 */
-		 N_("Bracketing Enable")},
+            N_("Bracketing Enable")},
 		{PTP_DPC_NIKON_AutoExposureBracketStep,		/* 0xD0C1 */
-		 N_("Exposure Bracketing Step")},
+            N_("Exposure Bracketing Step")},
 		{PTP_DPC_NIKON_AutoExposureBracketProgram,	/* 0xD0C2 */
-		 N_("Exposure Bracketing Program")},
+            N_("Exposure Bracketing Program")},
 		{PTP_DPC_NIKON_AutoExposureBracketCount,	/* 0xD0C3 */
-		 N_("Auto Exposure Bracket Count")},
+            N_("Auto Exposure Bracket Count")},
 		{PTP_DPC_NIKON_WhiteBalanceBracketStep, N_("White Balance Bracket Step")}, /* 0xD0C4 */
 		{PTP_DPC_NIKON_WhiteBalanceBracketProgram, N_("White Balance Bracket Program")}, /* 0xD0C5 */
 		{PTP_DPC_NIKON_LensID,				/* 0xD0E0 */
-		 N_("Lens ID")},
+            N_("Lens ID")},
 		{PTP_DPC_NIKON_LensSort,			/* 0xD0E1 */
-		 N_("Lens Sort")},
+            N_("Lens Sort")},
 		{PTP_DPC_NIKON_LensType,			/* 0xD0E2 */
-		 N_("Lens Type")},
+            N_("Lens Type")},
 		{PTP_DPC_NIKON_FocalLengthMin,			/* 0xD0E3 */
-		 N_("Min. Focal Length")},
+            N_("Min. Focal Length")},
 		{PTP_DPC_NIKON_FocalLengthMax,			/* 0xD0E4 */
-		 N_("Max. Focal Length")},
+            N_("Max. Focal Length")},
 		{PTP_DPC_NIKON_MaxApAtMinFocalLength,		/* 0xD0E5 */
-		 N_("Max. Aperture at Min. Focal Length")},
+            N_("Max. Aperture at Min. Focal Length")},
 		{PTP_DPC_NIKON_MaxApAtMaxFocalLength,		/* 0xD0E6 */
-		 N_("Max. Aperture at Max. Focal Length")},
+            N_("Max. Aperture at Max. Focal Length")},
 		{PTP_DPC_NIKON_FinderISODisp,			/* 0xD0F0 */
-		 N_("Finder ISO Display")},
+            N_("Finder ISO Display")},
 		{PTP_DPC_NIKON_AutoOffPhoto,			/* 0xD0F2 */
-		 N_("Auto Off Photo")},
+            N_("Auto Off Photo")},
 		{PTP_DPC_NIKON_AutoOffMenu,			/* 0xD0F3 */
-		 N_("Auto Off Menu")},
+            N_("Auto Off Menu")},
 		{PTP_DPC_NIKON_AutoOffInfo,			/* 0xD0F4 */
-		 N_("Auto Off Info")},
+            N_("Auto Off Info")},
 		{PTP_DPC_NIKON_SelfTimerShootNum,		/* 0xD0F5 */
-		 N_("Self Timer Shot Number")},
+            N_("Self Timer Shot Number")},
 		{PTP_DPC_NIKON_VignetteCtrl,			/* 0xD0F7 */
-		 N_("Vignette Control")},
+            N_("Vignette Control")},
 		{PTP_DPC_NIKON_AutoDistortionControl,		/* 0xD0F8 */
-		 N_("Auto Distortion Control")},
+            N_("Auto Distortion Control")},
+		{PTP_DPC_NIKON_SceneMode,			/* 0xD0F9 */
+            N_("Scene Mode")},
 		{PTP_DPC_NIKON_ExposureTime,			/* 0xD100 */
-		 N_("Nikon Exposure Time")},
+            N_("Nikon Exposure Time")},
 		{PTP_DPC_NIKON_ACPower, N_("AC Power")},	/* 0xD101 */
 		{PTP_DPC_NIKON_WarningStatus, N_("Warning Status")},/* 0xD102 */
 		{PTP_DPC_NIKON_MaximumShots,			/* 0xD103 */
-		 N_("Maximum Shots")},
+            N_("Maximum Shots")},
 		{PTP_DPC_NIKON_AFLockStatus, N_("AF Locked")},/* 0xD104 */
 		{PTP_DPC_NIKON_AELockStatus, N_("AE Locked")},/* 0xD105 */
 		{PTP_DPC_NIKON_FVLockStatus, N_("FV Locked")},/* 0xD106 */
 		{PTP_DPC_NIKON_AutofocusLCDTopMode2,		/* 0xD107 */
-		 N_("AF LCD Top Mode 2")},
+            N_("AF LCD Top Mode 2")},
 		{PTP_DPC_NIKON_AutofocusArea,			/* 0xD108 */
-		 N_("Active AF Sensor")},
+            N_("Active AF Sensor")},
 		{PTP_DPC_NIKON_FlexibleProgram,			/* 0xD109 */
-		 N_("Flexible Program")},
+            N_("Flexible Program")},
 		{PTP_DPC_NIKON_LightMeter,			/* 0xD10A */
-		 N_("Exposure Meter")},
+            N_("Exposure Meter")},
 		{PTP_DPC_NIKON_RecordingMedia,			/* 0xD10B */
-		 N_("Recording Media")},
+            N_("Recording Media")},
 		{PTP_DPC_NIKON_USBSpeed,			/* 0xD10C */
-		 N_("USB Speed")},
+            N_("USB Speed")},
 		{PTP_DPC_NIKON_CCDNumber,			/* 0xD10D */
-		 N_("CCD Serial Number")},
+            N_("CCD Serial Number")},
 		{PTP_DPC_NIKON_CameraOrientation,		/* 0xD10E */
-		 N_("Camera Orientation")},
+            N_("Camera Orientation")},
 		{PTP_DPC_NIKON_GroupPtnType,			/* 0xD10F */
-		 N_("Group PTN Type")},
+            N_("Group PTN Type")},
 		{PTP_DPC_NIKON_FNumberLock,			/* 0xD110 */
-		 N_("FNumber Lock")},
+            N_("FNumber Lock")},
 		{PTP_DPC_NIKON_ExposureApertureLock,		/* 0xD111 */
-		 N_("Exposure Aperture Lock")},
+            N_("Exposure Aperture Lock")},
 		{PTP_DPC_NIKON_TVLockSetting,			/* 0xD112 */
-		 N_("TV Lock Setting")},
+            N_("TV Lock Setting")},
 		{PTP_DPC_NIKON_AVLockSetting,			/* 0xD113 */
-		 N_("AV Lock Setting")},
+            N_("AV Lock Setting")},
 		{PTP_DPC_NIKON_IllumSetting,			/* 0xD114 */
-		 N_("Illum Setting")},
+            N_("Illum Setting")},
 		{PTP_DPC_NIKON_FocusPointBright,		/* 0xD115 */
-		 N_("Focus Point Bright")},
+            N_("Focus Point Bright")},
 		{PTP_DPC_NIKON_ExternalFlashAttached,		/* 0xD120 */
-		 N_("External Flash Attached")},
+            N_("External Flash Attached")},
 		{PTP_DPC_NIKON_ExternalFlashStatus,		/* 0xD121 */
-		 N_("External Flash Status")},
+            N_("External Flash Status")},
 		{PTP_DPC_NIKON_ExternalFlashSort,		/* 0xD122 */
-		 N_("External Flash Sort")},
+            N_("External Flash Sort")},
 		{PTP_DPC_NIKON_ExternalFlashMode,		/* 0xD123 */
-		 N_("External Flash Mode")},
+            N_("External Flash Mode")},
 		{PTP_DPC_NIKON_ExternalFlashCompensation,	/* 0xD124 */
-		 N_("External Flash Compensation")},
+            N_("External Flash Compensation")},
 		{PTP_DPC_NIKON_NewExternalFlashMode,		/* 0xD125 */
-		 N_("External Flash Mode")},
+            N_("External Flash Mode")},
 		{PTP_DPC_NIKON_FlashExposureCompensation,	/* 0xD126 */
-		 N_("Flash Exposure Compensation")},
+            N_("Flash Exposure Compensation")},
 		{PTP_DPC_NIKON_HDRMode,				/* 0xD130 */
-		 N_("HDR Mode")},
+            N_("HDR Mode")},
 		{PTP_DPC_NIKON_HDRHighDynamic,			/* 0xD131 */
-		 N_("HDR High Dynamic")},
+            N_("HDR High Dynamic")},
 		{PTP_DPC_NIKON_HDRSmoothing,			/* 0xD132 */
-		 N_("HDR Smoothing")},
+            N_("HDR Smoothing")},
 		{PTP_DPC_NIKON_OptimizeImage,			/* 0xD140 */
-		 N_("Optimize Image")},
+            N_("Optimize Image")},
 		{PTP_DPC_NIKON_Saturation,			/* 0xD142 */
-		 N_("Saturation")},
+            N_("Saturation")},
 		{PTP_DPC_NIKON_BW_FillerEffect,			/* 0xD143 */
-		 N_("BW Filler Effect")},
+            N_("BW Filler Effect")},
 		{PTP_DPC_NIKON_BW_Sharpness,			/* 0xD144 */
-		 N_("BW Sharpness")},
+            N_("BW Sharpness")},
 		{PTP_DPC_NIKON_BW_Contrast,			/* 0xD145 */
-		 N_("BW Contrast")},
+            N_("BW Contrast")},
 		{PTP_DPC_NIKON_BW_Setting_Type,			/* 0xD146 */
-		 N_("BW Setting Type")},
+            N_("BW Setting Type")},
 		{PTP_DPC_NIKON_Slot2SaveMode,			/* 0xD148 */
-		 N_("Slot 2 Save Mode")},
+            N_("Slot 2 Save Mode")},
 		{PTP_DPC_NIKON_RawBitMode,			/* 0xD149 */
-		 N_("Raw Bit Mode")},
-		{PTP_DPC_NIKON_ISOAutoTime,			/* 0xD14E */
-		 N_("ISO Auto Time")},
+            N_("Raw Bit Mode")},
+		{PTP_DPC_NIKON_ActiveDLighting,			/* 0xD14E */
+            N_("Active D-Lighting")},
 		{PTP_DPC_NIKON_FlourescentType,			/* 0xD14F */
-		 N_("Flourescent Type")},
+            N_("Flourescent Type")},
 		{PTP_DPC_NIKON_TuneColourTemperature,		/* 0xD150 */
-		 N_("Tune Colour Temperature")},
+            N_("Tune Colour Temperature")},
 		{PTP_DPC_NIKON_TunePreset0,			/* 0xD151 */
-		 N_("Tune Preset 0")},
+            N_("Tune Preset 0")},
 		{PTP_DPC_NIKON_TunePreset1,			/* 0xD152 */
-		 N_("Tune Preset 1")},
+            N_("Tune Preset 1")},
 		{PTP_DPC_NIKON_TunePreset2,			/* 0xD153 */
-		 N_("Tune Preset 2")},
+            N_("Tune Preset 2")},
 		{PTP_DPC_NIKON_TunePreset3,			/* 0xD154 */
-		 N_("Tune Preset 3")},
+            N_("Tune Preset 3")},
 		{PTP_DPC_NIKON_TunePreset4,			/* 0xD155 */
-		 N_("Tune Preset 4")},
+            N_("Tune Preset 4")},
 		{PTP_DPC_NIKON_BeepOff,				/* 0xD160 */
-		 N_("AF Beep Mode")},
+            N_("AF Beep Mode")},
 		{PTP_DPC_NIKON_AutofocusMode,			/* 0xD161 */
-		 N_("Autofocus Mode")},
+            N_("Autofocus Mode")},
 		{PTP_DPC_NIKON_AFAssist,			/* 0xD163 */
-		 N_("AF Assist Lamp")},
+            N_("AF Assist Lamp")},
 		{PTP_DPC_NIKON_PADVPMode,			/* 0xD164 */
-		 N_("Auto ISO P/A/DVP Setting")},
+            N_("Auto ISO P/A/DVP Setting")},
 		{PTP_DPC_NIKON_ImageReview,			/* 0xD165 */
-		 N_("Image Review")},
+            N_("Image Review")},
 		{PTP_DPC_NIKON_AFAreaIllumination,		/* 0xD166 */
-		 N_("AF Area Illumination")},
+            N_("AF Area Illumination")},
 		{PTP_DPC_NIKON_FlashMode,			/* 0xD167 */
-		 N_("Flash Mode")},
+            N_("Flash Mode")},
 		{PTP_DPC_NIKON_FlashCommanderMode,	 	/* 0xD168 */
-		 N_("Flash Commander Mode")},
+            N_("Flash Commander Mode")},
 		{PTP_DPC_NIKON_FlashSign,			/* 0xD169 */
-		 N_("Flash Sign")},
-		{PTP_DPC_NIKON_ISOAuto,				/* 0xD16A */
-		 N_("ISO Auto")},
+            N_("Flash Sign")},
+		{PTP_DPC_NIKON_ISO_Auto,			/* 0xD16A */
+            N_("ISO Auto")},
 		{PTP_DPC_NIKON_RemoteTimeout,			/* 0xD16B */
-		 N_("Remote Timeout")},
+            N_("Remote Timeout")},
 		{PTP_DPC_NIKON_GridDisplay,			/* 0xD16C */
-		 N_("Viewfinder Grid Display")},
+            N_("Viewfinder Grid Display")},
 		{PTP_DPC_NIKON_FlashModeManualPower,		/* 0xD16D */
-		 N_("Flash Mode Manual Power")},
+            N_("Flash Mode Manual Power")},
 		{PTP_DPC_NIKON_FlashModeCommanderPower,		/* 0xD16E */
-		 N_("Flash Mode Commander Power")},
+            N_("Flash Mode Commander Power")},
 		{PTP_DPC_NIKON_AutoFP,				/* 0xD16F */
-		 N_("Auto FP")},
+            N_("Auto FP")},
 		{PTP_DPC_NIKON_CSMMenu,				/* 0xD180 */
-		 N_("CSM Menu")},
+            N_("CSM Menu")},
 		{PTP_DPC_NIKON_WarningDisplay,			/* 0xD181 */
-		 N_("Warning Display")},
+            N_("Warning Display")},
 		{PTP_DPC_NIKON_BatteryCellKind,			/* 0xD182 */
-		 N_("Battery Cell Kind")},
+            N_("Battery Cell Kind")},
 		{PTP_DPC_NIKON_ISOAutoHiLimit,			/* 0xD183 */
-		 N_("ISO Auto High Limit")},
+            N_("ISO Auto High Limit")},
 		{PTP_DPC_NIKON_DynamicAFArea,			/* 0xD184 */
-		 N_("Dynamic AF Area")},
+            N_("Dynamic AF Area")},
 		{PTP_DPC_NIKON_ContinuousSpeedHigh,		/* 0xD186 */
-		 N_("Continuous Speed High")},
+            N_("Continuous Speed High")},
 		{PTP_DPC_NIKON_InfoDispSetting,			/* 0xD187 */
-		 N_("Info Disp Setting")},
+            N_("Info Disp Setting")},
 		{PTP_DPC_NIKON_PreviewButton,			/* 0xD189 */
-		 N_("Preview Button")},
+            N_("Preview Button")},
 		{PTP_DPC_NIKON_PreviewButton2,			/* 0xD18A */
-		 N_("Preview Button 2")},
+            N_("Preview Button 2")},
 		{PTP_DPC_NIKON_AEAFLockButton2,			/* 0xD18B */
-		 N_("AEAF Lock Button 2")},
+            N_("AEAF Lock Button 2")},
 		{PTP_DPC_NIKON_IndicatorDisp,			/* 0xD18D */
-		 N_("Indicator Display")},
+            N_("Indicator Display")},
 		{PTP_DPC_NIKON_CellKindPriority,		/* 0xD18E */
-		 N_("Cell Kind Priority")},
+            N_("Cell Kind Priority")},
 		{PTP_DPC_NIKON_BracketingFramesAndSteps,	/* 0xD190 */
-		 N_("Bracketing Frames and Steps")},
+            N_("Bracketing Frames and Steps")},
 		{PTP_DPC_NIKON_LiveViewMode,			/* 0xD1A0 */
-		 N_("Live View Mode")},
+            N_("Live View Mode")},
 		{PTP_DPC_NIKON_LiveViewDriveMode,		/* 0xD1A1 */
-		 N_("Live View Drive Mode")},
+            N_("Live View Drive Mode")},
 		{PTP_DPC_NIKON_LiveViewStatus,			/* 0xD1A2 */
-		 N_("Live View Status")},
+            N_("Live View Status")},
 		{PTP_DPC_NIKON_LiveViewImageZoomRatio,		/* 0xD1A3 */
-		 N_("Live View Image Zoom Ratio")},
+            N_("Live View Image Zoom Ratio")},
 		{PTP_DPC_NIKON_LiveViewProhibitCondition,	/* 0xD1A4 */
-		 N_("Live View Prohibit Condition")},
+            N_("Live View Prohibit Condition")},
 		{PTP_DPC_NIKON_ExposureDisplayStatus,		/* 0xD1B0 */
-		 N_("Exposure Display Status")},
+            N_("Exposure Display Status")},
 		{PTP_DPC_NIKON_ExposureIndicateStatus,		/* 0xD1B1 */
-		 N_("Exposure Indicate Status")},
-		{PTP_DPC_NIKON_ExposureIndicateLightup,		/* 0xD1B2 */
-		 N_("Exposure Indicate Lightup")},
+            N_("Exposure Indicate Status")},
+		{PTP_DPC_NIKON_InfoDispErrStatus,		/* 0xD1B2 */
+            N_("Info Display Error Status")},
+		{PTP_DPC_NIKON_ExposureIndicateLightup,		/* 0xD1B3 */
+            N_("Exposure Indicate Lightup")},
 		{PTP_DPC_NIKON_FlashOpen,			/* 0xD1C0 */
-		 N_("Flash Open")},
+            N_("Flash Open")},
 		{PTP_DPC_NIKON_FlashCharged,			/* 0xD1C1 */
-		 N_("Flash Charged")},
+            N_("Flash Charged")},
 		{PTP_DPC_NIKON_FlashMRepeatValue,		/* 0xD1D0 */
-		 N_("Flash MRepeat Value")},
+            N_("Flash MRepeat Value")},
 		{PTP_DPC_NIKON_FlashMRepeatCount,		/* 0xD1D1 */
-		 N_("Flash MRepeat Count")},
+            N_("Flash MRepeat Count")},
 		{PTP_DPC_NIKON_FlashMRepeatInterval,		/* 0xD1D2 */
-		 N_("Flash MRepeat Interval")},
+            N_("Flash MRepeat Interval")},
 		{PTP_DPC_NIKON_FlashCommandChannel,		/* 0xD1D3 */
-		 N_("Flash Command Channel")},
+            N_("Flash Command Channel")},
 		{PTP_DPC_NIKON_FlashCommandSelfMode,		/* 0xD1D4 */
-		 N_("Flash Command Self Mode")},
+            N_("Flash Command Self Mode")},
 		{PTP_DPC_NIKON_FlashCommandSelfCompensation,	/* 0xD1D5 */
-		 N_("Flash Command Self Compensation")},
+            N_("Flash Command Self Compensation")},
 		{PTP_DPC_NIKON_FlashCommandSelfValue,		/* 0xD1D6 */
-		 N_("Flash Command Self Value")},
+            N_("Flash Command Self Value")},
 		{PTP_DPC_NIKON_FlashCommandAMode,		/* 0xD1D7 */
-		 N_("Flash Command A Mode")},
+            N_("Flash Command A Mode")},
 		{PTP_DPC_NIKON_FlashCommandACompensation,	/* 0xD1D8 */
-		 N_("Flash Command A Compensation")},
+            N_("Flash Command A Compensation")},
 		{PTP_DPC_NIKON_FlashCommandAValue,		/* 0xD1D9 */
-		 N_("Flash Command A Value")},
+            N_("Flash Command A Value")},
 		{PTP_DPC_NIKON_FlashCommandBMode,		/* 0xD1DA */
-		 N_("Flash Command B Mode")},
+            N_("Flash Command B Mode")},
 		{PTP_DPC_NIKON_FlashCommandBCompensation,	/* 0xD1DB */
-		 N_("Flash Command B Compensation")},
+            N_("Flash Command B Compensation")},
 		{PTP_DPC_NIKON_FlashCommandBValue,		/* 0xD1DC */
-		 N_("Flash Command B Value")},
+            N_("Flash Command B Value")},
 		{PTP_DPC_NIKON_ActivePicCtrlItem,		/* 0xD200 */
-		 N_("Active Pic Ctrl Item")},
+            N_("Active Pic Ctrl Item")},
 		{PTP_DPC_NIKON_ChangePicCtrlItem,		/* 0xD201 */
-		 N_("Change Pic Ctrl Item")},
+            N_("Change Pic Ctrl Item")},
 		{0,NULL}
 	};
-        struct {
+    struct {
 		uint16_t dpc;
 		const char *txt;
-        } ptp_device_properties_MTP[] = {
+    } ptp_device_properties_MTP[] = {
 		{PTP_DPC_MTP_SecureTime,        N_("Secure Time")},		/* D101 */
 		{PTP_DPC_MTP_DeviceCertificate, N_("Device Certificate")},	/* D102 */
 		{PTP_DPC_MTP_RevocationInfo,    N_("Revocation Info")},		/* D103 */
 		{PTP_DPC_MTP_SynchronizationPartner,				/* D401 */
-		 N_("Synchronization Partner")},
+            N_("Synchronization Partner")},
 		{PTP_DPC_MTP_DeviceFriendlyName,				/* D402 */
-		 N_("Friendly Device Name")},
+            N_("Friendly Device Name")},
 		{PTP_DPC_MTP_VolumeLevel,       N_("Volume Level")},		/* D403 */
 		{PTP_DPC_MTP_DeviceIcon,        N_("Device Icon")},		/* D405 */
 		{PTP_DPC_MTP_SessionInitiatorInfo,	N_("Session Initiator Info")},/* D406 */
@@ -4101,15 +4699,15 @@ ptp_get_property_description(PTPParams* params, uint16_t dpc)
 		{PTP_DPC_MTP_PlaybackRate,      N_("Playback Rate")},		/* D410 */
 		{PTP_DPC_MTP_PlaybackObject,    N_("Playback Object")},		/* D411 */
 		{PTP_DPC_MTP_PlaybackContainerIndex,				/* D412 */
-		 N_("Playback Container Index")},
+            N_("Playback Container Index")},
 		{PTP_DPC_MTP_PlaybackPosition,  N_("Playback Position")},	/* D413 */
 		{PTP_DPC_MTP_PlaysForSureID,    N_("PlaysForSure ID")},		/* D131 (?) */
 		{0,NULL}
-        };
-        struct {
+    };
+    struct {
 		uint16_t dpc;
 		const char *txt;
-        } ptp_device_properties_FUJI[] = {
+    } ptp_device_properties_FUJI[] = {
 		{PTP_DPC_FUJI_ColorTemperature, N_("Color Temperature")},	/* 0xD017 */
 		{PTP_DPC_FUJI_Quality, N_("Quality")},				/* 0xD018 */
 		{PTP_DPC_FUJI_Quality, N_("Release Mode")},			/* 0xD201 */
@@ -4118,38 +4716,38 @@ ptp_get_property_description(PTPParams* params, uint16_t dpc)
 		{PTP_DPC_FUJI_Quality, N_("Aperture")},				/* 0xD218 */
 		{PTP_DPC_FUJI_Quality, N_("Shutter Speed")},			/* 0xD219 */
 		{0,NULL}
-        };
-
+    };
+    
 	for (i=0; ptp_device_properties[i].txt!=NULL; i++)
 		if (ptp_device_properties[i].dpc==dpc)
 			return (ptp_device_properties[i].txt);
-
+    
 	if (params->deviceinfo.VendorExtensionID==PTP_VENDOR_MICROSOFT
 	    || params->deviceinfo.VendorExtensionID==PTP_VENDOR_MTP)
 		for (i=0; ptp_device_properties_MTP[i].txt!=NULL; i++)
 			if (ptp_device_properties_MTP[i].dpc==dpc)
 				return (ptp_device_properties_MTP[i].txt);
-
+    
 	if (params->deviceinfo.VendorExtensionID==PTP_VENDOR_EASTMAN_KODAK)
 		for (i=0; ptp_device_properties_EK[i].txt!=NULL; i++)
 			if (ptp_device_properties_EK[i].dpc==dpc)
 				return (ptp_device_properties_EK[i].txt);
-
+    
 	if (params->deviceinfo.VendorExtensionID==PTP_VENDOR_CANON)
 		for (i=0; ptp_device_properties_Canon[i].txt!=NULL; i++)
 			if (ptp_device_properties_Canon[i].dpc==dpc)
 				return (ptp_device_properties_Canon[i].txt);
-
+    
 	if (params->deviceinfo.VendorExtensionID==PTP_VENDOR_NIKON)
 		for (i=0; ptp_device_properties_Nikon[i].txt!=NULL; i++)
 			if (ptp_device_properties_Nikon[i].dpc==dpc)
 				return (ptp_device_properties_Nikon[i].txt);
-
+    
 	if (params->deviceinfo.VendorExtensionID==PTP_VENDOR_FUJI)
 		for (i=0; ptp_device_properties_FUJI[i].txt!=NULL; i++)
 			if (ptp_device_properties_FUJI[i].dpc==dpc)
 				return (ptp_device_properties_FUJI[i].txt);
-
+    
 	return NULL;
 }
 
@@ -4164,31 +4762,31 @@ _value_to_num(PTPPropertyValue *data, uint16_t dt) {
 		return 0;
 	} else {
 		switch (dt) {
-		case PTP_DTC_UNDEF: 
-			return 0;
-		case PTP_DTC_INT8:
-			return data->i8;
-		case PTP_DTC_UINT8:
-			return data->u8;
-		case PTP_DTC_INT16:
-			return data->i16;
-		case PTP_DTC_UINT16:
-			return data->u16;
-		case PTP_DTC_INT32:
-			return data->i32;
-		case PTP_DTC_UINT32:
-			return data->u32;
-	/*
-		PTP_DTC_INT64           
-		PTP_DTC_UINT64         
-		PTP_DTC_INT128        
-		PTP_DTC_UINT128      
-	*/
-		default:
-			return 0;
+            case PTP_DTC_UNDEF:
+                return 0;
+            case PTP_DTC_INT8:
+                return data->i8;
+            case PTP_DTC_UINT8:
+                return data->u8;
+            case PTP_DTC_INT16:
+                return data->i16;
+            case PTP_DTC_UINT16:
+                return data->u16;
+            case PTP_DTC_INT32:
+                return data->i32;
+            case PTP_DTC_UINT32:
+                return data->u32;
+                /*
+                 PTP_DTC_INT64
+                 PTP_DTC_UINT64
+                 PTP_DTC_INT128
+                 PTP_DTC_UINT128
+                 */
+            default:
+                return 0;
 		}
 	}
-
+    
 	return 0;
 }
 
@@ -4199,11 +4797,11 @@ _value_to_num(PTPPropertyValue *data, uint16_t dt) {
 
 int
 ptp_render_property_value(PTPParams* params, uint16_t dpc,
-			  PTPDevicePropDesc *dpd, int length, char *out)
+                          PTPDevicePropDesc *dpd, unsigned int length, char *out)
 {
-	int i;
+	unsigned int i;
 	int64_t	kval;
-
+    
 	struct {
 		uint16_t dpc;
 		uint16_t vendor;
@@ -4221,7 +4819,7 @@ ptp_render_property_value(PTPParams* params, uint16_t dpc,
 		{PTP_DPC_CaptureDelay, 0, 0.001, 0.0, "%.1fs"},		/* 5012 */
 		{PTP_DPC_DigitalZoom, 0, 0.1, 0.0, "%.1f"},		/* 5016 */
 		{PTP_DPC_BurstInterval, 0, 0.001, 0.0, "%.1fs"},	/* 5019 */
-
+        
 		/* Nikon device properties */
 		{PTP_DPC_NIKON_LightMeter, PTP_VENDOR_NIKON, 0.08333, 0.0, N_("%.1f stops")},/* D10A */
 		{PTP_DPC_NIKON_FlashExposureCompensation, PTP_VENDOR_NIKON, 0.16666, 0.0, N_("%.1f stops")}, /* D126 */
@@ -4232,9 +4830,10 @@ ptp_render_property_value(PTPParams* params, uint16_t dpc,
 		{PTP_DPC_NIKON_MaxApAtMaxFocalLength, PTP_VENDOR_NIKON, 0.01, 0.0, "f/%.2g"}, /* D0E6 */
 		{PTP_DPC_NIKON_ExternalFlashCompensation, PTP_VENDOR_NIKON, 1.0/6.0, 0.0,"%.0f"}, /* D124 */
 		{PTP_DPC_NIKON_ExposureIndicateStatus, PTP_VENDOR_NIKON, 0.08333, 0.0, N_("%.1f stops")},/* D1B1 - FIXME: check if correct. */
+		{PTP_DPC_NIKON_AngleLevel, PTP_VENDOR_NIKON, 1.0/65536, 0.0, "%.1f'"},/* 0xD067 */
 		{0, 0, 0.0, 0.0, NULL}
 	};
-
+    
 	struct {
 		uint16_t dpc;
 		uint16_t vendor;
@@ -4302,8 +4901,8 @@ ptp_render_property_value(PTPParams* params, uint16_t dpc,
 		{PTP_DPC_FocusMeteringMode, PTP_VENDOR_NIKON, 32784, N_("Single Area")},
 		{PTP_DPC_FocusMeteringMode, PTP_VENDOR_NIKON, 32785, N_("Closest Subject")},
 		{PTP_DPC_FocusMeteringMode, PTP_VENDOR_NIKON, 32786, N_("Group Dynamic")},
-
-
+        
+        
 		/* Nikon specific device properties */
 		{PTP_DPC_NIKON_ImageSharpening, PTP_VENDOR_NIKON, 0, N_("Auto")},	/* D02A */
 		{PTP_DPC_NIKON_ImageSharpening, PTP_VENDOR_NIKON, 1, N_("Normal")},
@@ -4312,7 +4911,7 @@ ptp_render_property_value(PTPParams* params, uint16_t dpc,
 		{PTP_DPC_NIKON_ImageSharpening, PTP_VENDOR_NIKON, 4, N_("Medium high")},
 		{PTP_DPC_NIKON_ImageSharpening, PTP_VENDOR_NIKON, 5, N_("High")},
 		{PTP_DPC_NIKON_ImageSharpening, PTP_VENDOR_NIKON, 6, N_("None")},
-
+        
 		{PTP_DPC_NIKON_ToneCompensation, PTP_VENDOR_NIKON, 0, N_("Auto")},	/* D02B */
 		{PTP_DPC_NIKON_ToneCompensation, PTP_VENDOR_NIKON, 1, N_("Normal")},
 		{PTP_DPC_NIKON_ToneCompensation, PTP_VENDOR_NIKON, 2, N_("Low contrast")},
@@ -4320,18 +4919,18 @@ ptp_render_property_value(PTPParams* params, uint16_t dpc,
 		{PTP_DPC_NIKON_ToneCompensation, PTP_VENDOR_NIKON, 4, N_("Medium High")},
 		{PTP_DPC_NIKON_ToneCompensation, PTP_VENDOR_NIKON, 5, N_("High control")},
 		{PTP_DPC_NIKON_ToneCompensation, PTP_VENDOR_NIKON, 6, N_("Custom")},
-
+        
 		{PTP_DPC_NIKON_ColorModel, PTP_VENDOR_NIKON, 0, "sRGB"},		/* D02C */
 		{PTP_DPC_NIKON_ColorModel, PTP_VENDOR_NIKON, 1, "AdobeRGB"},
 		{PTP_DPC_NIKON_ColorModel, PTP_VENDOR_NIKON, 2, "sRGB"},
-
+        
 		PTP_VENDOR_VAL_BOOL(PTP_DPC_NIKON_AutoDXCrop,PTP_VENDOR_NIKON),	   	/* D033 */
-
+        
 		PTP_VENDOR_VAL_BOOL(PTP_DPC_NIKON_FocusAreaWrap,PTP_VENDOR_NIKON),   	/* D04F */
-
+        
 		PTP_VENDOR_VAL_BOOL(PTP_DPC_NIKON_EnableCopyright,PTP_VENDOR_NIKON),   	/* D053 */
 		PTP_VENDOR_VAL_BOOL(PTP_DPC_NIKON_ISOAuto,PTP_VENDOR_NIKON),	   	/* D054 */
-
+        
 		/* FIXME! this is not ISO Auto (which is a bool) Perhaps ISO Auto Time?*/
 		{PTP_DPC_NIKON_ISOAuto,	PTP_VENDOR_NIKON, 0, "1/125"},			/* D054 */
 		{PTP_DPC_NIKON_ISOAuto,	PTP_VENDOR_NIKON, 1, "1/60"},
@@ -4346,46 +4945,46 @@ ptp_render_property_value(PTPParams* params, uint16_t dpc,
 		{PTP_DPC_NIKON_ISOAuto,	PTP_VENDOR_NIKON, 10, "8"},
 		{PTP_DPC_NIKON_ISOAuto,	PTP_VENDOR_NIKON, 11, "15"},
 		{PTP_DPC_NIKON_ISOAuto,	PTP_VENDOR_NIKON, 12, "30"},
-
+        
 		{PTP_DPC_NIKON_EVStep, PTP_VENDOR_NIKON, 0, "1/3"},			/* D056 */
 		{PTP_DPC_NIKON_EVStep, PTP_VENDOR_NIKON, 1, "1/2"},
-
+        
 		PTP_VENDOR_VAL_BOOL(PTP_DPC_NIKON_ExposureCompensation,PTP_VENDOR_NIKON),/*D058 */
 		PTP_VENDOR_VAL_BOOL(PTP_DPC_NIKON_AELockMode,PTP_VENDOR_NIKON),    	/* D05E */
-
+        
 		{PTP_DPC_NIKON_AELAFLMode, PTP_VENDOR_NIKON, 0, N_("AE/AF Lock")},	/* D05F */
 		{PTP_DPC_NIKON_AELAFLMode, PTP_VENDOR_NIKON, 1, N_("AF Lock only")},
 		{PTP_DPC_NIKON_AELAFLMode, PTP_VENDOR_NIKON, 2, N_("AE Lock only")},
 		{PTP_DPC_NIKON_AELAFLMode, PTP_VENDOR_NIKON, 3, N_("AF Lock Hold")},
 		{PTP_DPC_NIKON_AELAFLMode, PTP_VENDOR_NIKON, 4, N_("AF On")},
 		{PTP_DPC_NIKON_AELAFLMode, PTP_VENDOR_NIKON, 5, N_("Flash Lock")},
-
+        
 		{PTP_DPC_NIKON_MeterOff, PTP_VENDOR_NIKON, 0, N_("4 seconds")},		/* D062 */
 		{PTP_DPC_NIKON_MeterOff, PTP_VENDOR_NIKON, 1, N_("6 seconds")},
 		{PTP_DPC_NIKON_MeterOff, PTP_VENDOR_NIKON, 2, N_("8 seconds")},
 		{PTP_DPC_NIKON_MeterOff, PTP_VENDOR_NIKON, 3, N_("16 seconds")},
 		{PTP_DPC_NIKON_MeterOff, PTP_VENDOR_NIKON, 4, N_("30 minutes")},
 		{PTP_DPC_NIKON_MeterOff, PTP_VENDOR_NIKON, 5, N_("30 seconds")},
-
+        
 		{PTP_DPC_NIKON_SelfTimer, PTP_VENDOR_NIKON, 0, N_("2 seconds")},	/* D063 */
 		{PTP_DPC_NIKON_SelfTimer, PTP_VENDOR_NIKON, 1, N_("5 seconds")},
 		{PTP_DPC_NIKON_SelfTimer, PTP_VENDOR_NIKON, 2, N_("10 seconds")},
 		{PTP_DPC_NIKON_SelfTimer, PTP_VENDOR_NIKON, 3, N_("20 seconds")},
-
+        
 		{PTP_DPC_NIKON_MonitorOff, PTP_VENDOR_NIKON, 0, N_("10 seconds")},	/* D064 */
 		{PTP_DPC_NIKON_MonitorOff, PTP_VENDOR_NIKON, 1, N_("20 seconds")},
 		{PTP_DPC_NIKON_MonitorOff, PTP_VENDOR_NIKON, 2, N_("1 minute")},
 		{PTP_DPC_NIKON_MonitorOff, PTP_VENDOR_NIKON, 3, N_("5 minutes")},
 		{PTP_DPC_NIKON_MonitorOff, PTP_VENDOR_NIKON, 4, N_("10 minutes")},
 		{PTP_DPC_NIKON_MonitorOff, PTP_VENDOR_NIKON, 5, N_("5 seconds")}, /* d80 observed */
-
+        
 		PTP_VENDOR_VAL_BOOL(PTP_DPC_NIKON_ExposureDelayMode,PTP_VENDOR_NIKON),	/* D06A */
 		PTP_VENDOR_VAL_BOOL(PTP_DPC_NIKON_LongExposureNoiseReduction,PTP_VENDOR_NIKON),	/* D06B */
 		PTP_VENDOR_VAL_BOOL(PTP_DPC_NIKON_FileNumberSequence,PTP_VENDOR_NIKON),	/* D06C */
 		PTP_VENDOR_VAL_BOOL(PTP_DPC_NIKON_D7Illumination,PTP_VENDOR_NIKON),	/* D06F */
-
+        
 		PTP_VENDOR_VAL_BOOL(PTP_DPC_NIKON_SHSET_CH_GUID_DISP,PTP_VENDOR_NIKON),	/* D071 */
-
+        
 		{PTP_DPC_NIKON_FlashShutterSpeed, PTP_VENDOR_NIKON, 0, "1/60s"},		/* D075 */
 		{PTP_DPC_NIKON_FlashShutterSpeed, PTP_VENDOR_NIKON, 1, "1/30s"},
 		{PTP_DPC_NIKON_FlashShutterSpeed, PTP_VENDOR_NIKON, 2, "1/15s"},
@@ -4398,35 +4997,35 @@ ptp_render_property_value(PTPParams* params, uint16_t dpc,
 		{PTP_DPC_NIKON_FlashShutterSpeed, PTP_VENDOR_NIKON, 9, "8s"},
 		{PTP_DPC_NIKON_FlashShutterSpeed, PTP_VENDOR_NIKON, 10, "15s"},
 		{PTP_DPC_NIKON_FlashShutterSpeed, PTP_VENDOR_NIKON, 11, "30s"},
-
+        
 		PTP_VENDOR_VAL_BOOL(PTP_DPC_NIKON_E4ModelingFlash,PTP_VENDOR_NIKON),	/* D077 */
-
+        
 		{PTP_DPC_NIKON_BracketSet, PTP_VENDOR_NIKON, 0, N_("AE & Flash")},	/* D078 */
 		{PTP_DPC_NIKON_BracketSet, PTP_VENDOR_NIKON, 1, N_("AE only")},
 		{PTP_DPC_NIKON_BracketSet, PTP_VENDOR_NIKON, 2, N_("Flash only")},
 		{PTP_DPC_NIKON_BracketSet, PTP_VENDOR_NIKON, 3, N_("WB bracketing")},
-
+        
 		{PTP_DPC_NIKON_BracketOrder, PTP_VENDOR_NIKON, 0, N_("MTR > Under")},	/* D07A */
 		{PTP_DPC_NIKON_BracketOrder, PTP_VENDOR_NIKON, 1, N_("Under > MTR")},
-
+        
 		{PTP_DPC_NIKON_F1CenterButtonShootingMode, PTP_VENDOR_NIKON, 0, N_("Reset focus point to center")}, /* D080 */
 		{PTP_DPC_NIKON_F1CenterButtonShootingMode, PTP_VENDOR_NIKON, 1, N_("Highlight active focus point")},
 		{PTP_DPC_NIKON_F1CenterButtonShootingMode, PTP_VENDOR_NIKON, 2, N_("Unused")},
-
+        
 		PTP_VENDOR_VAL_BOOL(PTP_DPC_NIKON_F3PhotoInfoPlayback,PTP_VENDOR_NIKON),/* D083 */
 		PTP_VENDOR_VAL_BOOL(PTP_DPC_NIKON_F5CustomizeCommDials,PTP_VENDOR_NIKON),/* D085 */
 		PTP_VENDOR_VAL_BOOL(PTP_DPC_NIKON_ReverseCommandDial,PTP_VENDOR_NIKON),	/* D086 */
 		PTP_VENDOR_VAL_RBOOL(PTP_DPC_NIKON_F6ButtonsAndDials,PTP_VENDOR_NIKON),	/* D089 */
 		PTP_VENDOR_VAL_RBOOL(PTP_DPC_NIKON_NoCFCard,PTP_VENDOR_NIKON),		/* D08A */
 		PTP_VENDOR_VAL_RBOOL(PTP_DPC_NIKON_AFAreaPoint,PTP_VENDOR_NIKON),	/* D08D */
-
+        
 		PTP_VENDOR_VAL_BOOL(PTP_DPC_NIKON_ImageCommentEnable,PTP_VENDOR_NIKON),	/* D091 */
 		PTP_VENDOR_VAL_RBOOL(PTP_DPC_NIKON_ImageRotation,PTP_VENDOR_NIKON),	/* D092 */
-
+        
 		PTP_VENDOR_VAL_RBOOL(PTP_DPC_NIKON_MovVoice,PTP_VENDOR_NIKON),		/* D0A1 */
-
+        
 		PTP_VENDOR_VAL_BOOL(PTP_DPC_NIKON_Bracketing,PTP_VENDOR_NIKON),		/* D0C0 */
-
+        
 		/* http://www.rottmerhusen.com/objektives/lensid/nikkor.html is complete */
 		{PTP_DPC_NIKON_LensID, PTP_VENDOR_NIKON, 0, N_("Unknown")},		/* D0E0 */
 		{PTP_DPC_NIKON_LensID, PTP_VENDOR_NIKON, 38, "Sigma 70-300mm 1:4-5.6 D APO Macro"},
@@ -4440,40 +5039,43 @@ ptp_render_property_value(PTPParams* params, uint16_t dpc,
 		{PTP_DPC_NIKON_FinderISODisp, PTP_VENDOR_NIKON, 0, "Show ISO sensitivity"},/* 0xD0F0 */
 		{PTP_DPC_NIKON_FinderISODisp, PTP_VENDOR_NIKON, 1, "Show ISO/Easy ISO"},
 		{PTP_DPC_NIKON_FinderISODisp, PTP_VENDOR_NIKON, 2, "Show frame count"},
-
+        
+		{PTP_DPC_NIKON_RawCompression, PTP_VENDOR_NIKON, 0, N_("Lossless")},	/* D016 */
+		{PTP_DPC_NIKON_RawCompression, PTP_VENDOR_NIKON, 1, N_("Lossy")},
+        
 		PTP_VENDOR_VAL_YN(PTP_DPC_NIKON_ACPower,PTP_VENDOR_NIKON),		/* D101 */
 		PTP_VENDOR_VAL_YN(PTP_DPC_NIKON_AFLockStatus,PTP_VENDOR_NIKON),		/* D104 */
 		PTP_VENDOR_VAL_YN(PTP_DPC_NIKON_AELockStatus,PTP_VENDOR_NIKON),		/* D105 */
 		PTP_VENDOR_VAL_YN(PTP_DPC_NIKON_FVLockStatus,PTP_VENDOR_NIKON),		/* D106 */
-
+        
 		{PTP_DPC_NIKON_AutofocusArea, PTP_VENDOR_NIKON, 0, N_("Centre")},	/* D108 */
 		{PTP_DPC_NIKON_AutofocusArea, PTP_VENDOR_NIKON, 1, N_("Top")},
 		{PTP_DPC_NIKON_AutofocusArea, PTP_VENDOR_NIKON, 2, N_("Bottom")},
 		{PTP_DPC_NIKON_AutofocusArea, PTP_VENDOR_NIKON, 3, N_("Left")},
 		{PTP_DPC_NIKON_AutofocusArea, PTP_VENDOR_NIKON, 4, N_("Right")},
-
+        
 		{PTP_DPC_NIKON_RecordingMedia, PTP_VENDOR_NIKON, 0, N_("Card")},	/* D10B */
 		{PTP_DPC_NIKON_RecordingMedia, PTP_VENDOR_NIKON, 1, N_("SDRam")},
-
+        
 		{PTP_DPC_NIKON_USBSpeed, PTP_VENDOR_NIKON, 0, N_("USB 1.1")},		/* D10C */
 		{PTP_DPC_NIKON_USBSpeed, PTP_VENDOR_NIKON, 1, N_("USB 2.0")},
-
+        
 		{PTP_DPC_NIKON_CameraOrientation, PTP_VENDOR_NIKON, 0, "0'"},		/* D10E */
 		{PTP_DPC_NIKON_CameraOrientation, PTP_VENDOR_NIKON, 1, "270'"},
 		{PTP_DPC_NIKON_CameraOrientation, PTP_VENDOR_NIKON, 2, "90'"},
 		{PTP_DPC_NIKON_CameraOrientation, PTP_VENDOR_NIKON, 3, "180'"},
-
+        
 		PTP_VENDOR_VAL_YN(PTP_DPC_NIKON_FNumberLock,PTP_VENDOR_NIKON),		/* D110 */
 		PTP_VENDOR_VAL_YN(PTP_DPC_NIKON_ExposureApertureLock,PTP_VENDOR_NIKON),	/* D111 */
 		PTP_VENDOR_VAL_YN(PTP_DPC_NIKON_TVLockSetting,PTP_VENDOR_NIKON),	/* D112 */
 		PTP_VENDOR_VAL_YN(PTP_DPC_NIKON_AVLockSetting,PTP_VENDOR_NIKON),	/* D113 */
-
+        
 		{PTP_DPC_NIKON_IllumSetting,PTP_VENDOR_NIKON,0,N_("LCD Backlight")},	/* D114 */
 		{PTP_DPC_NIKON_IllumSetting,PTP_VENDOR_NIKON,1,N_("LCD Backlight and Info Display")},
-
+        
 		PTP_VENDOR_VAL_YN(PTP_DPC_NIKON_ExternalFlashAttached,PTP_VENDOR_NIKON),/* D120 */
 		PTP_VENDOR_VAL_YN(PTP_DPC_NIKON_ExternalFlashStatus,PTP_VENDOR_NIKON),	/* D121 */
-
+        
 		{PTP_DPC_NIKON_OptimizeImage, PTP_VENDOR_NIKON, 0, N_("Normal")},	/* D140 */
 		{PTP_DPC_NIKON_OptimizeImage, PTP_VENDOR_NIKON, 1, N_("Vivid")},
 		{PTP_DPC_NIKON_OptimizeImage, PTP_VENDOR_NIKON, 2, N_("Sharper")},
@@ -4482,21 +5084,21 @@ ptp_render_property_value(PTPParams* params, uint16_t dpc,
 		{PTP_DPC_NIKON_OptimizeImage, PTP_VENDOR_NIKON, 5, N_("Portrait")},
 		{PTP_DPC_NIKON_OptimizeImage, PTP_VENDOR_NIKON, 6, N_("Landscape")},
 		{PTP_DPC_NIKON_OptimizeImage, PTP_VENDOR_NIKON, 7, N_("Custom")},
-
+        
 		{PTP_DPC_NIKON_Saturation, PTP_VENDOR_NIKON, 0, N_("Normal")},		/* D142 */
 		{PTP_DPC_NIKON_Saturation, PTP_VENDOR_NIKON, 1, N_("Moderate")},
 		{PTP_DPC_NIKON_Saturation, PTP_VENDOR_NIKON, 2, N_("Enhanced")},
-
+        
 		PTP_VENDOR_VAL_RBOOL(PTP_DPC_NIKON_BeepOff,PTP_VENDOR_NIKON),		/* D160 */
-
+        
 		{PTP_DPC_NIKON_AutofocusMode, PTP_VENDOR_NIKON, 0, N_("AF-S")},	 	/* D161 */
 		{PTP_DPC_NIKON_AutofocusMode, PTP_VENDOR_NIKON, 1, N_("AF-C")},
 		{PTP_DPC_NIKON_AutofocusMode, PTP_VENDOR_NIKON, 2, N_("AF-A")},
 		{PTP_DPC_NIKON_AutofocusMode, PTP_VENDOR_NIKON, 3, N_("MF (fixed)")},
 		{PTP_DPC_NIKON_AutofocusMode, PTP_VENDOR_NIKON, 4, N_("MF (selection)")},
-
+        
 		PTP_VENDOR_VAL_RBOOL(PTP_DPC_NIKON_AFAssist,PTP_VENDOR_NIKON),   	/* D163 */
-
+        
 		{PTP_DPC_NIKON_PADVPMode, PTP_VENDOR_NIKON, 0,  "1/125"},		/* D164 */
 		{PTP_DPC_NIKON_PADVPMode, PTP_VENDOR_NIKON, 1,  "1/60"},
 		{PTP_DPC_NIKON_PADVPMode, PTP_VENDOR_NIKON, 2,  "1/30"},
@@ -4510,36 +5112,36 @@ ptp_render_property_value(PTPParams* params, uint16_t dpc,
 		{PTP_DPC_NIKON_PADVPMode, PTP_VENDOR_NIKON, 10, "8"},
 		{PTP_DPC_NIKON_PADVPMode, PTP_VENDOR_NIKON, 11, "15"},
 		{PTP_DPC_NIKON_PADVPMode, PTP_VENDOR_NIKON, 12, "30"},
-
+        
 		PTP_VENDOR_VAL_RBOOL(PTP_DPC_NIKON_ImageReview,PTP_VENDOR_NIKON),	/* D165 */
-
+        
 		{PTP_DPC_NIKON_AFAreaIllumination, PTP_VENDOR_NIKON, 0, N_("Auto")},	/* D166 */
 		{PTP_DPC_NIKON_AFAreaIllumination, PTP_VENDOR_NIKON, 1, N_("Off")},
 		{PTP_DPC_NIKON_AFAreaIllumination, PTP_VENDOR_NIKON, 2, N_("On")},
-
+        
 		{PTP_DPC_NIKON_FlashMode, PTP_VENDOR_NIKON, 0, "iTTL"},			/* D167 */
 		{PTP_DPC_NIKON_FlashMode, PTP_VENDOR_NIKON, 1, N_("Manual")},
 		{PTP_DPC_NIKON_FlashMode, PTP_VENDOR_NIKON, 2, N_("Commander")},
-
+        
 		{PTP_DPC_NIKON_FlashCommanderMode, PTP_VENDOR_NIKON, 0, N_("TTL")},	/* D168 */
 		{PTP_DPC_NIKON_FlashCommanderMode, PTP_VENDOR_NIKON, 1, N_("Auto Aperture")},
 		{PTP_DPC_NIKON_FlashCommanderMode, PTP_VENDOR_NIKON, 2, N_("Full Manual")},
-
+        
 		PTP_VENDOR_VAL_RBOOL(PTP_DPC_NIKON_FlashSign,PTP_VENDOR_NIKON),		/* D169 */
-
+        
 		{PTP_DPC_NIKON_RemoteTimeout, PTP_VENDOR_NIKON, 0, N_("1 min")},	/* D16B */
 		{PTP_DPC_NIKON_RemoteTimeout, PTP_VENDOR_NIKON, 1, N_("5 mins")},
 		{PTP_DPC_NIKON_RemoteTimeout, PTP_VENDOR_NIKON, 2, N_("10 mins")},
 		{PTP_DPC_NIKON_RemoteTimeout, PTP_VENDOR_NIKON, 3, N_("15 mins")},
-
+        
 		PTP_VENDOR_VAL_BOOL(PTP_DPC_NIKON_GridDisplay,PTP_VENDOR_NIKON),	/* D16C */
-
+        
 		{PTP_DPC_NIKON_FlashModeManualPower, PTP_VENDOR_NIKON, 0, N_("Full")},	/* D16D */
 		{PTP_DPC_NIKON_FlashModeManualPower, PTP_VENDOR_NIKON, 1, "1/2"},
 		{PTP_DPC_NIKON_FlashModeManualPower, PTP_VENDOR_NIKON, 2, "1/4"},
 		{PTP_DPC_NIKON_FlashModeManualPower, PTP_VENDOR_NIKON, 3, "1/8"},
 		{PTP_DPC_NIKON_FlashModeManualPower, PTP_VENDOR_NIKON, 4, "1/16"},
-
+        
 		{PTP_DPC_NIKON_FlashModeCommanderPower, PTP_VENDOR_NIKON, 0, N_("Full")},/* D16E */
 		{PTP_DPC_NIKON_FlashModeCommanderPower, PTP_VENDOR_NIKON, 1, "1/2"},
 		{PTP_DPC_NIKON_FlashModeCommanderPower, PTP_VENDOR_NIKON, 2, "1/4"},
@@ -4548,81 +5150,97 @@ ptp_render_property_value(PTPParams* params, uint16_t dpc,
 		{PTP_DPC_NIKON_FlashModeCommanderPower, PTP_VENDOR_NIKON, 5, "1/32"},
 		{PTP_DPC_NIKON_FlashModeCommanderPower, PTP_VENDOR_NIKON, 6, "1/64"},
 		{PTP_DPC_NIKON_FlashModeCommanderPower, PTP_VENDOR_NIKON, 7, "1/128"},
-
+        
 		PTP_VENDOR_VAL_YN(PTP_DPC_NIKON_CSMMenu,PTP_VENDOR_NIKON),		/* D180 */
 		PTP_VENDOR_VAL_YN(PTP_DPC_NIKON_WarningDisplay,PTP_VENDOR_NIKON),	/* D181 */
-
+        
 		{PTP_DPC_NIKON_BatteryCellKind, PTP_VENDOR_NIKON, 0, "LR6 (AA alkaline)"},/* D182 */
 		{PTP_DPC_NIKON_BatteryCellKind, PTP_VENDOR_NIKON, 1, "HR6 (AA Ni-Mh)"},
 		{PTP_DPC_NIKON_BatteryCellKind, PTP_VENDOR_NIKON, 2, "FR6 (AA Lithium)"},
 		{PTP_DPC_NIKON_BatteryCellKind, PTP_VENDOR_NIKON, 3, "ZR6 (AA Ni-Mn)"},
-
+        
 		{PTP_DPC_NIKON_ISOAutoHiLimit, PTP_VENDOR_NIKON, 0, "400"},		/* D183 */
 		{PTP_DPC_NIKON_ISOAutoHiLimit, PTP_VENDOR_NIKON, 1, "800"},
 		{PTP_DPC_NIKON_ISOAutoHiLimit, PTP_VENDOR_NIKON, 2, "1600"},
 		{PTP_DPC_NIKON_ISOAutoHiLimit, PTP_VENDOR_NIKON, 3, "3200"},
 		{PTP_DPC_NIKON_ISOAutoHiLimit, PTP_VENDOR_NIKON, 4, "Hi 1"},
 		{PTP_DPC_NIKON_ISOAutoHiLimit, PTP_VENDOR_NIKON, 5, "Hi 2"},
-
+        
 		{PTP_DPC_NIKON_InfoDispSetting, PTP_VENDOR_NIKON, 0, N_("Auto")},	/* 0xD187 */
 		{PTP_DPC_NIKON_InfoDispSetting, PTP_VENDOR_NIKON, 1, N_("Dark on light")},
 		{PTP_DPC_NIKON_InfoDispSetting, PTP_VENDOR_NIKON, 2, N_("Light on dark")},
-
+        
 		PTP_VENDOR_VAL_YN(PTP_DPC_NIKON_IndicatorDisp,PTP_VENDOR_NIKON),	/* D18D */
-
+        
 		PTP_VENDOR_VAL_YN(PTP_DPC_NIKON_LiveViewStatus,PTP_VENDOR_NIKON),	/* D1A2 */
-
+        
 		PTP_VENDOR_VAL_YN(PTP_DPC_NIKON_ExposureDisplayStatus,PTP_VENDOR_NIKON),/* D1B0 */
 		PTP_VENDOR_VAL_YN(PTP_DPC_NIKON_InfoDispErrStatus,PTP_VENDOR_NIKON),	/* D1B2 */
 		PTP_VENDOR_VAL_YN(PTP_DPC_NIKON_ExposureIndicateLightup,PTP_VENDOR_NIKON),/* D1B3 */
-
+        
 		PTP_VENDOR_VAL_YN(PTP_DPC_NIKON_FlashOpen,PTP_VENDOR_NIKON),		/* D1C0 */
 		PTP_VENDOR_VAL_YN(PTP_DPC_NIKON_FlashCharged,PTP_VENDOR_NIKON),		/* D1C1 */
-
+        
+		PTP_VENDOR_VAL_YN(PTP_DPC_NIKON_ManualMovieSetting,PTP_VENDOR_NIKON),	/* 0xD0A6 */
+        
+		{PTP_DPC_NIKON_FlickerReduction, PTP_VENDOR_NIKON, 0, "50Hz"},		/* 0xD034 */
+		{PTP_DPC_NIKON_FlickerReduction, PTP_VENDOR_NIKON, 1, "60Hz"},
+        
+		{PTP_DPC_NIKON_RemoteMode, PTP_VENDOR_NIKON, 0, N_("Delayed Remote")},	/* 0xD035 */
+		{PTP_DPC_NIKON_RemoteMode, PTP_VENDOR_NIKON, 1, N_("Quick Response")},	/* 0xD035 */
+		{PTP_DPC_NIKON_RemoteMode, PTP_VENDOR_NIKON, 2, N_("Remote Mirror Up")},/* 0xD035 */
+        
+		{PTP_DPC_NIKON_MonitorOffDelay, PTP_VENDOR_NIKON, 0, "5min"},	/* 0xD0b3 */
+		{PTP_DPC_NIKON_MonitorOffDelay, PTP_VENDOR_NIKON, 1, "10min"},	/* 0xD0b3 */
+		{PTP_DPC_NIKON_MonitorOffDelay, PTP_VENDOR_NIKON, 2, "15min"},	/* 0xD0b3 */
+		{PTP_DPC_NIKON_MonitorOffDelay, PTP_VENDOR_NIKON, 3, "20min"},	/* 0xD0b3 */
+		{PTP_DPC_NIKON_MonitorOffDelay, PTP_VENDOR_NIKON, 4, "30min"},	/* 0xD0b3 */
+        
+        
 		/* Canon stuff */
 		PTP_VENDOR_VAL_BOOL(PTP_DPC_CANON_AssistLight,PTP_VENDOR_CANON),
 		PTP_VENDOR_VAL_RBOOL(PTP_DPC_CANON_RotationScene,PTP_VENDOR_CANON),
 		PTP_VENDOR_VAL_RBOOL(PTP_DPC_CANON_BeepMode,PTP_VENDOR_CANON),
 		PTP_VENDOR_VAL_BOOL(PTP_DPC_CANON_Beep,PTP_VENDOR_CANON),
-
+        
 		{PTP_DPC_CANON_RotationAngle, PTP_VENDOR_CANON, 0, "0'"},
 		{PTP_DPC_CANON_RotationAngle, PTP_VENDOR_CANON, 3, "270'"},
 		{PTP_DPC_CANON_RotationAngle, PTP_VENDOR_CANON, 1, "90'"},
-
+        
 		{PTP_DPC_CANON_BatteryKind, PTP_VENDOR_CANON, 0, N_("Unknown")},
 		{PTP_DPC_CANON_BatteryKind, PTP_VENDOR_CANON, 1, N_("AC")},
 		{PTP_DPC_CANON_BatteryKind, PTP_VENDOR_CANON, 2, N_("Lithium Ion")},
 		{PTP_DPC_CANON_BatteryKind, PTP_VENDOR_CANON, 3, N_("Nickel hydride")},
 		{PTP_DPC_CANON_BatteryKind, PTP_VENDOR_CANON, 4, N_("Nickel cadmium")},
 		{PTP_DPC_CANON_BatteryKind, PTP_VENDOR_CANON, 5, N_("Alkalium manganese")},
-
+        
 		{PTP_DPC_CANON_BatteryStatus, PTP_VENDOR_CANON, 0, N_("Undefined")},
 		{PTP_DPC_CANON_BatteryStatus, PTP_VENDOR_CANON, 1, N_("Normal")},
 		{PTP_DPC_CANON_BatteryStatus, PTP_VENDOR_CANON, 2, N_("Warning Level 1")},
 		{PTP_DPC_CANON_BatteryStatus, PTP_VENDOR_CANON, 3, N_("Emergency")},
 		{PTP_DPC_CANON_BatteryStatus, PTP_VENDOR_CANON, 4, N_("Warning Level 0")},
-
+        
 		{PTP_DPC_CANON_ImageQuality, PTP_VENDOR_CANON, 0, N_("Undefined")},
 		{PTP_DPC_CANON_ImageQuality, PTP_VENDOR_CANON, 1, N_("Economy")},
 		{PTP_DPC_CANON_ImageQuality, PTP_VENDOR_CANON, 2, N_("Normal")},
 		{PTP_DPC_CANON_ImageQuality, PTP_VENDOR_CANON, 3, N_("Fine")},
 		{PTP_DPC_CANON_ImageQuality, PTP_VENDOR_CANON, 4, N_("Lossless")},
 		{PTP_DPC_CANON_ImageQuality, PTP_VENDOR_CANON, 5, N_("SuperFine")},
-
+        
 		{PTP_DPC_CANON_FullViewFileFormat, PTP_VENDOR_CANON, 0, N_("Undefined")},
 		{PTP_DPC_CANON_FullViewFileFormat, PTP_VENDOR_CANON, 1, N_("JPEG")},
 		{PTP_DPC_CANON_FullViewFileFormat, PTP_VENDOR_CANON, 2, N_("CRW")},
-
+        
 		{PTP_DPC_CANON_ImageSize, PTP_VENDOR_CANON, 0, N_("Large")},
 		{PTP_DPC_CANON_ImageSize, PTP_VENDOR_CANON, 1, N_("Medium 1")},
 		{PTP_DPC_CANON_ImageSize, PTP_VENDOR_CANON, 2, N_("Small")},
 		{PTP_DPC_CANON_ImageSize, PTP_VENDOR_CANON, 3, N_("Medium 2")},
 		{PTP_DPC_CANON_ImageSize, PTP_VENDOR_CANON, 7, N_("Medium 3")},
-
+        
 		{PTP_DPC_CANON_SelfTime, PTP_VENDOR_CANON, 0,   N_("Not used")},
 		{PTP_DPC_CANON_SelfTime, PTP_VENDOR_CANON, 100, N_("10 seconds")},
 		{PTP_DPC_CANON_SelfTime, PTP_VENDOR_CANON, 20,  N_("2 seconds")},
-
+        
 		{PTP_DPC_CANON_FlashMode, PTP_VENDOR_CANON, 0,  N_("Off")},
 		{PTP_DPC_CANON_FlashMode, PTP_VENDOR_CANON, 1,  N_("Auto")},
 		{PTP_DPC_CANON_FlashMode, PTP_VENDOR_CANON, 2,  N_("On")},
@@ -4630,7 +5248,7 @@ ptp_render_property_value(PTPParams* params, uint16_t dpc,
 		{PTP_DPC_CANON_FlashMode, PTP_VENDOR_CANON, 4,  N_("Low Speed Synchronization")},
 		{PTP_DPC_CANON_FlashMode, PTP_VENDOR_CANON, 5,  N_("Auto + Red Eye Suppression")},
 		{PTP_DPC_CANON_FlashMode, PTP_VENDOR_CANON, 6,  N_("On + Red Eye Suppression")},
-
+        
 		{PTP_DPC_CANON_ShootingMode, PTP_VENDOR_CANON, 0,  N_("Auto")},
 		{PTP_DPC_CANON_ShootingMode, PTP_VENDOR_CANON, 1,  N_("P")},
 		{PTP_DPC_CANON_ShootingMode, PTP_VENDOR_CANON, 2,  N_("Tv")},
@@ -4640,7 +5258,7 @@ ptp_render_property_value(PTPParams* params, uint16_t dpc,
 		{PTP_DPC_CANON_ShootingMode, PTP_VENDOR_CANON, 6,  N_("M_DEP")},
 		{PTP_DPC_CANON_ShootingMode, PTP_VENDOR_CANON, 7,  N_("Bulb")},
 		/* more actually */
-
+        
 		{PTP_DPC_CANON_ImageMode, PTP_VENDOR_CANON, 0,  N_("Auto")},
 		{PTP_DPC_CANON_ImageMode, PTP_VENDOR_CANON, 1,  N_("Manual")},
 		{PTP_DPC_CANON_ImageMode, PTP_VENDOR_CANON, 2,  N_("Distant View")},
@@ -4656,18 +5274,18 @@ ptp_render_property_value(PTPParams* params, uint16_t dpc,
 		{PTP_DPC_CANON_ImageMode, PTP_VENDOR_CANON, 12,  N_("Pan Focus")},
 		{PTP_DPC_CANON_ImageMode, PTP_VENDOR_CANON, 13,  N_("Neutral")},
 		{PTP_DPC_CANON_ImageMode, PTP_VENDOR_CANON, 14,  N_("Soft")},
-
+        
 		{PTP_DPC_CANON_DriveMode, PTP_VENDOR_CANON, 0,  N_("Single-Frame Shooting")},
 		{PTP_DPC_CANON_DriveMode, PTP_VENDOR_CANON, 1,  N_("Continuous Shooting")},
 		{PTP_DPC_CANON_DriveMode, PTP_VENDOR_CANON, 2,  N_("Timer (Single) Shooting")},
 		{PTP_DPC_CANON_DriveMode, PTP_VENDOR_CANON, 4,  N_("Continuous Low-speed Shooting")},
 		{PTP_DPC_CANON_DriveMode, PTP_VENDOR_CANON, 5,  N_("Continuous High-speed Shooting")},
-
+        
 		{PTP_DPC_CANON_EZoom, PTP_VENDOR_CANON, 0,  N_("Off")},
 		{PTP_DPC_CANON_EZoom, PTP_VENDOR_CANON, 1,  N_("2x")},
 		{PTP_DPC_CANON_EZoom, PTP_VENDOR_CANON, 2,  N_("4x")},
 		{PTP_DPC_CANON_EZoom, PTP_VENDOR_CANON, 3,  N_("Smooth")},
-
+        
 		{PTP_DPC_CANON_MeteringMode, PTP_VENDOR_CANON, 0,  N_("Center-weighted Metering")},
 		{PTP_DPC_CANON_MeteringMode, PTP_VENDOR_CANON, 1,  N_("Spot Metering")},
 		{PTP_DPC_CANON_MeteringMode, PTP_VENDOR_CANON, 2,  N_("Average Metering")},
@@ -4676,7 +5294,7 @@ ptp_render_property_value(PTPParams* params, uint16_t dpc,
 		{PTP_DPC_CANON_MeteringMode, PTP_VENDOR_CANON, 5,  N_("Center-weighted Average Metering")},
 		{PTP_DPC_CANON_MeteringMode, PTP_VENDOR_CANON, 6,  N_("Spot Metering Interlocked with AF Frame")},
 		{PTP_DPC_CANON_MeteringMode, PTP_VENDOR_CANON, 7,  N_("Multi-Spot Metering")},
-
+        
 		{PTP_DPC_CANON_AFDistance, PTP_VENDOR_CANON, 0,  N_("Manual")},
 		{PTP_DPC_CANON_AFDistance, PTP_VENDOR_CANON, 1,  N_("Auto")},
 		{PTP_DPC_CANON_AFDistance, PTP_VENDOR_CANON, 2,  N_("Unknown")},
@@ -4685,7 +5303,7 @@ ptp_render_property_value(PTPParams* params, uint16_t dpc,
 		{PTP_DPC_CANON_AFDistance, PTP_VENDOR_CANON, 5,  N_("Zone Focus (Close)")},
 		{PTP_DPC_CANON_AFDistance, PTP_VENDOR_CANON, 6,  N_("Zone Focus (Medium)")},
 		{PTP_DPC_CANON_AFDistance, PTP_VENDOR_CANON, 7,  N_("Zone Focus (Far)")},
-
+        
 		{PTP_DPC_CANON_FocusingPoint, PTP_VENDOR_CANON, 0,  N_("Invalid")},
 		{PTP_DPC_CANON_FocusingPoint, PTP_VENDOR_CANON, 0x1000,  N_("Focusing Point on Center Only, Manual")},
 		{PTP_DPC_CANON_FocusingPoint, PTP_VENDOR_CANON, 0x1001,  N_("Focusing Point on Center Only, Auto")},
@@ -4694,7 +5312,7 @@ ptp_render_property_value(PTPParams* params, uint16_t dpc,
 		{PTP_DPC_CANON_FocusingPoint, PTP_VENDOR_CANON, 0x3002,  N_("Multiple Focusing Points (Right)")},
 		{PTP_DPC_CANON_FocusingPoint, PTP_VENDOR_CANON, 0x3003,  N_("Multiple Focusing Points (Center)")},
 		{PTP_DPC_CANON_FocusingPoint, PTP_VENDOR_CANON, 0x3004,  N_("Multiple Focusing Points (Left)")},
-
+        
 		{PTP_DPC_CANON_WhiteBalance, PTP_VENDOR_CANON, 0,  N_("Auto")},
 		{PTP_DPC_CANON_WhiteBalance, PTP_VENDOR_CANON, 1,  N_("Daylight")},
 		{PTP_DPC_CANON_WhiteBalance, PTP_VENDOR_CANON, 2,  N_("Cloudy")},
@@ -4708,47 +5326,47 @@ ptp_render_property_value(PTPParams* params, uint16_t dpc,
 		{PTP_DPC_CANON_WhiteBalance, PTP_VENDOR_CANON, 12,  N_("Custom Whitebalance PC-3")},
 		{PTP_DPC_CANON_WhiteBalance, PTP_VENDOR_CANON, 13,  N_("Missing Number")},
 		{PTP_DPC_CANON_WhiteBalance, PTP_VENDOR_CANON, 14,  N_("Fluorescent H")}, /* dup? */
-
+        
 		{PTP_DPC_CANON_SlowShutterSetting, PTP_VENDOR_CANON, 0,  N_("Off")},
 		{PTP_DPC_CANON_SlowShutterSetting, PTP_VENDOR_CANON, 1,  N_("Night View")},
 		{PTP_DPC_CANON_SlowShutterSetting, PTP_VENDOR_CANON, 2,  N_("On")},
 		{PTP_DPC_CANON_SlowShutterSetting, PTP_VENDOR_CANON, 3,  N_("Low-speed shutter function not available")},
-
+        
 		{PTP_DPC_CANON_AFMode, PTP_VENDOR_CANON, 0,  N_("Single Shot")},
 		{PTP_DPC_CANON_AFMode, PTP_VENDOR_CANON, 1,  N_("AI Servo")},
 		{PTP_DPC_CANON_AFMode, PTP_VENDOR_CANON, 2,  N_("AI Focus")},
 		{PTP_DPC_CANON_AFMode, PTP_VENDOR_CANON, 3,  N_("Manual")},
 		{PTP_DPC_CANON_AFMode, PTP_VENDOR_CANON, 4,  N_("Continuous")},
-
+        
 		PTP_VENDOR_VAL_BOOL(PTP_DPC_CANON_ImageStabilization,PTP_VENDOR_CANON),
-
+        
 		{PTP_DPC_CANON_Contrast, PTP_VENDOR_CANON, -2,  N_("Low 2")},
 		{PTP_DPC_CANON_Contrast, PTP_VENDOR_CANON, -1,  N_("Low")},
 		{PTP_DPC_CANON_Contrast, PTP_VENDOR_CANON, 0,  N_("Standard")},
 		{PTP_DPC_CANON_Contrast, PTP_VENDOR_CANON, 1,  N_("High")},
 		{PTP_DPC_CANON_Contrast, PTP_VENDOR_CANON, 2,  N_("High 2")},
-
+        
 		{PTP_DPC_CANON_ColorGain, PTP_VENDOR_CANON, -2,  N_("Low 2")},
 		{PTP_DPC_CANON_ColorGain, PTP_VENDOR_CANON, -1,  N_("Low")},
 		{PTP_DPC_CANON_ColorGain, PTP_VENDOR_CANON, 0,  N_("Standard")},
 		{PTP_DPC_CANON_ColorGain, PTP_VENDOR_CANON, 1,  N_("High")},
 		{PTP_DPC_CANON_ColorGain, PTP_VENDOR_CANON, 2,  N_("High 2")},
-
+        
 		{PTP_DPC_CANON_Sharpness, PTP_VENDOR_CANON, -2,  N_("Low 2")},
 		{PTP_DPC_CANON_Sharpness, PTP_VENDOR_CANON, -1,  N_("Low")},
 		{PTP_DPC_CANON_Sharpness, PTP_VENDOR_CANON, 0,  N_("Standard")},
 		{PTP_DPC_CANON_Sharpness, PTP_VENDOR_CANON, 1,  N_("High")},
 		{PTP_DPC_CANON_Sharpness, PTP_VENDOR_CANON, 2,  N_("High 2")},
-
+        
 		{PTP_DPC_CANON_Sensitivity, PTP_VENDOR_CANON, 0,  N_("Standard")},
 		{PTP_DPC_CANON_Sensitivity, PTP_VENDOR_CANON, 1,  N_("Upper 1")},
 		{PTP_DPC_CANON_Sensitivity, PTP_VENDOR_CANON, 2,  N_("Upper 2")},
-
+        
 		{PTP_DPC_CANON_ParameterSet, PTP_VENDOR_CANON, 0x08,  N_("Standard Development Parameters")},
 		{PTP_DPC_CANON_ParameterSet, PTP_VENDOR_CANON, 0x10,  N_("Development Parameters 1")},
 		{PTP_DPC_CANON_ParameterSet, PTP_VENDOR_CANON, 0x20,  N_("Development Parameters 2")},
 		{PTP_DPC_CANON_ParameterSet, PTP_VENDOR_CANON, 0x40,  N_("Development Parameters 3")},
-
+        
 		{PTP_DPC_CANON_ISOSpeed, PTP_VENDOR_CANON, 0x00,  N_("Auto")},
 		{PTP_DPC_CANON_ISOSpeed, PTP_VENDOR_CANON, 0x28,  "6"},
 		{PTP_DPC_CANON_ISOSpeed, PTP_VENDOR_CANON, 0x30,  "12"},
@@ -4762,7 +5380,7 @@ ptp_render_property_value(PTPParams* params, uint16_t dpc,
 		{PTP_DPC_CANON_ISOSpeed, PTP_VENDOR_CANON, 0x68,  "1600"},
 		{PTP_DPC_CANON_ISOSpeed, PTP_VENDOR_CANON, 0x70,  "3200"},
 		{PTP_DPC_CANON_ISOSpeed, PTP_VENDOR_CANON, 0x78,  "6400"},
-
+        
 		/* 0xd01d - PTP_DPC_CANON_Aperture */
 		/* 0xd01e - PTP_DPC_CANON_ShutterSpeed */
 		/* 0xd01f - PTP_DPC_CANON_ExpCompensation */
@@ -4770,74 +5388,74 @@ ptp_render_property_value(PTPParams* params, uint16_t dpc,
 		/* 0xd021 - PTP_DPC_CANON_AEBExposureCompensation */
 		/* 0xd023 - PTP_DPC_CANON_AvOpen */
 		/* 0xd024 - PTP_DPC_CANON_AvMax */
-
+        
 		{PTP_DPC_CANON_CameraOutput, PTP_VENDOR_CANON, 0,  N_("Undefined")},
 		{PTP_DPC_CANON_CameraOutput, PTP_VENDOR_CANON, 1,  N_("LCD")},
 		{PTP_DPC_CANON_CameraOutput, PTP_VENDOR_CANON, 2,  N_("Video OUT")},
 		{PTP_DPC_CANON_CameraOutput, PTP_VENDOR_CANON, 3,  N_("Off")},
-
+        
 		{PTP_DPC_CANON_MlSpotPos, PTP_VENDOR_CANON, 0, N_("MlSpotPosCenter")},
 		{PTP_DPC_CANON_MlSpotPos, PTP_VENDOR_CANON, 1, N_("MlSpotPosAfLink")},
-
+        
 		{PTP_DPC_CANON_PhotoEffect, PTP_VENDOR_CANON, 0, N_("Off")},
 		{PTP_DPC_CANON_PhotoEffect, PTP_VENDOR_CANON, 1, N_("Vivid")},
 		{PTP_DPC_CANON_PhotoEffect, PTP_VENDOR_CANON, 2, N_("Neutral")},
 		{PTP_DPC_CANON_PhotoEffect, PTP_VENDOR_CANON, 3, N_("Soft")},
 		{PTP_DPC_CANON_PhotoEffect, PTP_VENDOR_CANON, 4, N_("Sepia")},
 		{PTP_DPC_CANON_PhotoEffect, PTP_VENDOR_CANON, 5, N_("Monochrome")},
-
+        
 		{0, 0, 0, NULL}
 	};
 	for (i=0; ptp_value_trans[i].dpc!=0; i++) {
-		if ((ptp_value_trans[i].dpc == dpc) && 
+		if ((ptp_value_trans[i].dpc == dpc) &&
 			(((ptp_value_trans[i].dpc & 0xf000) == 0x5000) ||
-		         (ptp_value_trans[i].vendor == params->deviceinfo.VendorExtensionID))
-		) {
+             (ptp_value_trans[i].vendor == params->deviceinfo.VendorExtensionID))
+            ) {
 			double value = _value_to_num(&(dpd->CurrentValue), dpd->DataType);
-
-			return snprintf(out, length, 
-				_(ptp_value_trans[i].format),
-				value * ptp_value_trans[i].coef +
-				ptp_value_trans[i].bias);
+            
+			return snprintf(out, length,
+                            _(ptp_value_trans[i].format),
+                            value * ptp_value_trans[i].coef +
+                            ptp_value_trans[i].bias);
 		}
 	}
-
+    
 	kval = _value_to_num(&(dpd->CurrentValue), dpd->DataType);
 	for (i=0; ptp_value_list[i].dpc!=0; i++) {
-		if ((ptp_value_list[i].dpc == dpc) && 
+		if ((ptp_value_list[i].dpc == dpc) &&
 			(((ptp_value_list[i].dpc & 0xf000) == 0x5000) ||
-		          (ptp_value_list[i].vendor == params->deviceinfo.VendorExtensionID)) &&
+             (ptp_value_list[i].vendor == params->deviceinfo.VendorExtensionID)) &&
 		    (ptp_value_list[i].key==kval)
-		) {
+            ) {
 			return snprintf(out, length, "%s", _(ptp_value_list[i].value));
 		}
 	}
 	if (params->deviceinfo.VendorExtensionID==PTP_VENDOR_MICROSOFT
 	    || params->deviceinfo.VendorExtensionID==PTP_VENDOR_MTP) {
 		switch (dpc) {
-		case PTP_DPC_MTP_SynchronizationPartner:
-		case PTP_DPC_MTP_DeviceFriendlyName:
-			return snprintf(out, length, "%s", dpd->CurrentValue.str);
-		case PTP_DPC_MTP_SecureTime:
-		case PTP_DPC_MTP_DeviceCertificate: {
-			/* FIXME: Convert to use unicode demux functions */
-			for (i=0;(i<dpd->CurrentValue.a.count) && (i<length);i++)
-				out[i] = dpd->CurrentValue.a.v[i].u16;
-			if (	dpd->CurrentValue.a.count &&
-				(dpd->CurrentValue.a.count < length)) {
-				out[dpd->CurrentValue.a.count-1] = 0;
-				return dpd->CurrentValue.a.count-1;
-			} else {
-				out[length-1] = 0;
-				return length;
-			}
-			break;
-		}
-		default:
-			break;
+            case PTP_DPC_MTP_SynchronizationPartner:
+            case PTP_DPC_MTP_DeviceFriendlyName:
+                return snprintf(out, length, "%s", dpd->CurrentValue.str);
+            case PTP_DPC_MTP_SecureTime:
+            case PTP_DPC_MTP_DeviceCertificate: {
+                /* FIXME: Convert to use unicode demux functions */
+                for (i=0;(i<dpd->CurrentValue.a.count) && (i<length);i++)
+                    out[i] = dpd->CurrentValue.a.v[i].u16;
+                if (	dpd->CurrentValue.a.count &&
+                    (dpd->CurrentValue.a.count < length)) {
+                    out[dpd->CurrentValue.a.count-1] = 0;
+                    return dpd->CurrentValue.a.count-1;
+                } else {
+                    out[length-1] = 0;
+                    return length;
+                }
+                break;
+            }
+            default:
+                break;
 		}
 	}
-
+    
 	return 0;
 }
 
@@ -4942,37 +5560,37 @@ struct {
 int
 ptp_render_ofc(PTPParams* params, uint16_t ofc, int spaceleft, char *txt)
 {
-	int i;
-	
+	unsigned int i;
+    
 	if (!(ofc & 0x8000)) {
 		for (i=0;i<sizeof(ptp_ofc_trans)/sizeof(ptp_ofc_trans[0]);i++)
 			if (ofc == ptp_ofc_trans[i].ofc)
 				return snprintf(txt, spaceleft, "%s", _(ptp_ofc_trans[i].format));
 	} else {
 		switch (params->deviceinfo.VendorExtensionID) {
-		case PTP_VENDOR_EASTMAN_KODAK:
-			switch (ofc) {
-			case PTP_OFC_EK_M3U:
-				return snprintf (txt, spaceleft,"M3U");
-			default:
-				break;
-			}
-			break;
-		case PTP_VENDOR_CANON:
-			switch (ofc) {
-			case PTP_OFC_CANON_CRW:
-				return snprintf (txt, spaceleft,"CRW");
-			default:
-				break;
-			}
-			break;
-		case PTP_VENDOR_MICROSOFT:
-		case PTP_VENDOR_MTP:		  
-			for (i=0;i<sizeof(ptp_ofc_mtp_trans)/sizeof(ptp_ofc_mtp_trans[0]);i++)
-				if (ofc == ptp_ofc_mtp_trans[i].ofc)
-					return snprintf(txt, spaceleft, "%s", _(ptp_ofc_mtp_trans[i].format));
-			break;
-		default:break;
+            case PTP_VENDOR_EASTMAN_KODAK:
+                switch (ofc) {
+                    case PTP_OFC_EK_M3U:
+                        return snprintf (txt, spaceleft,"M3U");
+                    default:
+                        break;
+                }
+                break;
+            case PTP_VENDOR_CANON:
+                switch (ofc) {
+                    case PTP_OFC_CANON_CRW:
+                        return snprintf (txt, spaceleft,"CRW");
+                    default:
+                        break;
+                }
+                break;
+            case PTP_VENDOR_MICROSOFT:
+            case PTP_VENDOR_MTP:
+                for (i=0;i<sizeof(ptp_ofc_mtp_trans)/sizeof(ptp_ofc_mtp_trans[0]);i++)
+                    if (ofc == ptp_ofc_mtp_trans[i].ofc)
+                        return snprintf(txt, spaceleft, "%s", _(ptp_ofc_mtp_trans[i].format));
+                break;
+            default:break;
 		}
 	}
 	return snprintf (txt, spaceleft,_("Unknown(%04x)"), ofc);
@@ -5029,7 +5647,7 @@ struct {
 	{PTP_OC_MTP_SetObjectReferences,N_("Set object references")},
 	{PTP_OC_MTP_UpdateDeviceFirmware,N_("Update device firmware")},
 	{PTP_OC_MTP_Skip,N_("Skip to next position in playlist")},
-
+    
 	/* WMDRMPD Extensions */
 	{PTP_OC_MTP_WMDRMPD_GetSecureTimeChallenge,N_("Get secure time challenge")},
 	{PTP_OC_MTP_WMDRMPD_GetSecureTimeResponse,N_("Get secure time response")},
@@ -5042,25 +5660,25 @@ struct {
 	{PTP_OC_MTP_WMDRMPD_GetLicenseState,N_("Get license state")},
 	{PTP_OC_MTP_WMDRMPD_SendWMDRMPDCommand,N_("Send WMDRM-PD Command")},
 	{PTP_OC_MTP_WMDRMPD_SendWMDRMPDRequest,N_("Send WMDRM-PD Request")},
-
+    
 	/* WMPPD Extensions */
 	{PTP_OC_MTP_WMPPD_ReportAddedDeletedItems,N_("Report Added/Deleted Items")},
 	{PTP_OC_MTP_WMPPD_ReportAcquiredItems,N_("Report Acquired Items")},
 	{PTP_OC_MTP_WMPPD_PlaylistObjectPref,N_("Get transferable playlist types")},
-
+    
 	/* WMDRMPD Extensions... these have no identifiers associated with them */
 	{PTP_OC_MTP_WMDRMPD_SendWMDRMPDAppRequest,N_("Send WMDRM-PD Application Request")},
 	{PTP_OC_MTP_WMDRMPD_GetWMDRMPDAppResponse,N_("Get WMDRM-PD Application Response")},
 	{PTP_OC_MTP_WMDRMPD_EnableTrustedFilesOperations,N_("Enable trusted file operations")},
 	{PTP_OC_MTP_WMDRMPD_DisableTrustedFilesOperations,N_("Disable trusted file operations")},
 	{PTP_OC_MTP_WMDRMPD_EndTrustedAppSession,N_("End trusted application session")},
-
+    
 	/* AAVT Extensions */
 	{PTP_OC_MTP_AAVT_OpenMediaSession,N_("Open Media Session")},
 	{PTP_OC_MTP_AAVT_CloseMediaSession,N_("Close Media Session")},
 	{PTP_OC_MTP_AAVT_GetNextDataBlock,N_("Get Next Data Block")},
 	{PTP_OC_MTP_AAVT_SetCurrentTimePosition,N_("Set Current Time Position")},
-
+    
 	/* WMDRMND Extensions */
 	{PTP_OC_MTP_WMDRMND_SendRegistrationRequest,N_("Send Registration Request")},
 	{PTP_OC_MTP_WMDRMND_GetRegistrationResponse,N_("Get Registration Response")},
@@ -5068,29 +5686,36 @@ struct {
 	{PTP_OC_MTP_WMDRMND_SendProximityResponse,N_("Send Proximity Response")},
 	{PTP_OC_MTP_WMDRMND_SendWMDRMNDLicenseRequest,N_("Send WMDRM-ND License Request")},
 	{PTP_OC_MTP_WMDRMND_GetWMDRMNDLicenseResponse,N_("Get WMDRM-ND License Response")},
-
+    
 	/* WiFi Provisioning MTP Extension Codes (microsoft.com/WPDWCN: 1.0) */
-	{PTP_OC_MTP_WPDWCN_ProcessWFCObject,N_("Process WFC Object")}
+	{PTP_OC_MTP_WPDWCN_ProcessWFCObject,N_("Process WFC Object")},
+    
+	/* Android Direct I/O Extensions */
+	{PTP_OC_ANDROID_GetPartialObject64,N_("Get Partial Object (64bit Offset)")},
+	{PTP_OC_ANDROID_SendPartialObject,N_("Send Partial Object")},
+	{PTP_OC_ANDROID_TruncateObject,N_("Truncate Object")},
+	{PTP_OC_ANDROID_BeginEditObject,N_("Begin Edit Object")},
+	{PTP_OC_ANDROID_EndEditObject,N_("End Edit Object")},
 };
 
 int
 ptp_render_opcode(PTPParams* params, uint16_t opcode, int spaceleft, char *txt)
 {
-	int i;
-
+	unsigned int i;
+    
 	if (!(opcode & 0x8000)) {
 		for (i=0;i<sizeof(ptp_opcode_trans)/sizeof(ptp_opcode_trans[0]);i++)
 			if (opcode == ptp_opcode_trans[i].opcode)
 				return snprintf(txt, spaceleft, "%s", _(ptp_opcode_trans[i].name));
 	} else {
 		switch (params->deviceinfo.VendorExtensionID) {
-		case PTP_VENDOR_MICROSOFT:
-		case PTP_VENDOR_MTP:
-			for (i=0;i<sizeof(ptp_opcode_mtp_trans)/sizeof(ptp_opcode_mtp_trans[0]);i++)
-				if (opcode == ptp_opcode_mtp_trans[i].opcode)
-					return snprintf(txt, spaceleft, "%s", _(ptp_opcode_mtp_trans[i].name));
-			break;
-		default:break;
+            case PTP_VENDOR_MICROSOFT:
+            case PTP_VENDOR_MTP:
+                for (i=0;i<sizeof(ptp_opcode_mtp_trans)/sizeof(ptp_opcode_mtp_trans[0]);i++)
+                    if (opcode == ptp_opcode_mtp_trans[i].opcode)
+                        return snprintf(txt, spaceleft, "%s", _(ptp_opcode_mtp_trans[i].name));
+                break;
+            default:break;
 		}
 	}
 	return snprintf (txt, spaceleft,_("Unknown (%04x)"), opcode);
@@ -5175,7 +5800,7 @@ struct {
 	{PTP_OPC_GivenName,"GivenName"},
 	{PTP_OPC_MiddleNames,"MiddleNames"},
 	{PTP_OPC_FamilyName,"FamilyName"},
-
+    
 	{PTP_OPC_Prefix,"Prefix"},
 	{PTP_OPC_Suffix,"Suffix"},
 	{PTP_OPC_PhoneticGivenName,"PhoneticGivenName"},
@@ -5273,7 +5898,7 @@ struct {
 
 int
 ptp_render_mtp_propname(uint16_t propid, int spaceleft, char *txt) {
-	int i;
+	unsigned int i;
 	for (i=0;i<sizeof(ptp_opc_trans)/sizeof(ptp_opc_trans[0]);i++)
 		if (propid == ptp_opc_trans[i].id)
 			return snprintf(txt, spaceleft, "%s", ptp_opc_trans[i].name);
@@ -5287,7 +5912,7 @@ MTPProperties *
 ptp_get_new_object_prop_entry(MTPProperties **props, int *nrofprops) {
 	MTPProperties *newprops;
 	MTPProperties *prop;
-
+    
 	if (*props == NULL) {
 		newprops = malloc(sizeof(MTPProperties)*(*nrofprops+1));
 	} else {
@@ -5306,31 +5931,31 @@ ptp_get_new_object_prop_entry(MTPProperties **props, int *nrofprops) {
 	return prop;
 }
 
-void 
+void
 ptp_destroy_object_prop(MTPProperties *prop)
 {
-  if (!prop)
-    return;
-  
-  if (prop->datatype == PTP_DTC_STR && prop->propval.str != NULL)
-    free(prop->propval.str);
-  else if ((prop->datatype == PTP_DTC_AINT8 || prop->datatype == PTP_DTC_AINT16 ||
-            prop->datatype == PTP_DTC_AINT32 || prop->datatype == PTP_DTC_AINT64 || prop->datatype == PTP_DTC_AINT128 ||
-            prop->datatype == PTP_DTC_AUINT8 || prop->datatype == PTP_DTC_AUINT16 ||
-            prop->datatype == PTP_DTC_AUINT32 || prop->datatype == PTP_DTC_AUINT64 || prop->datatype ==  PTP_DTC_AUINT128)
-            && prop->propval.a.v != NULL)
-    free(prop->propval.a.v);
+    if (!prop)
+        return;
+    
+    if (prop->datatype == PTP_DTC_STR && prop->propval.str != NULL)
+        free(prop->propval.str);
+    else if ((prop->datatype == PTP_DTC_AINT8 || prop->datatype == PTP_DTC_AINT16 ||
+              prop->datatype == PTP_DTC_AINT32 || prop->datatype == PTP_DTC_AINT64 || prop->datatype == PTP_DTC_AINT128 ||
+              prop->datatype == PTP_DTC_AUINT8 || prop->datatype == PTP_DTC_AUINT16 ||
+              prop->datatype == PTP_DTC_AUINT32 || prop->datatype == PTP_DTC_AUINT64 || prop->datatype ==  PTP_DTC_AUINT128)
+             && prop->propval.a.v != NULL)
+        free(prop->propval.a.v);
 }
 
-void 
+void
 ptp_destroy_object_prop_list(MTPProperties *props, int nrofprops)
 {
-  int i;
-  MTPProperties *prop = props;
-
-  for (i=0;i<nrofprops;i++,prop++)
-    ptp_destroy_object_prop(prop);
-  free(props);
+    int i;
+    MTPProperties *prop = props;
+    
+    for (i=0;i<nrofprops;i++,prop++)
+        ptp_destroy_object_prop(prop);
+    free(props);
 }
 
 /*
@@ -5340,11 +5965,11 @@ ptp_destroy_object_prop_list(MTPProperties *props, int nrofprops)
 MTPProperties *
 ptp_find_object_prop_in_cache(PTPParams *params, uint32_t const handle, uint32_t const attribute_id)
 {
-	int	i;
+	unsigned int	i;
 	MTPProperties	*prop;
 	PTPObject	*ob;
 	uint16_t	ret;
-
+    
 	ret = ptp_object_find (params, handle, &ob);
 	if (ret != PTP_RC_OK)
 		return NULL;
@@ -5360,17 +5985,17 @@ ptp_find_object_prop_in_cache(PTPParams *params, uint32_t const handle, uint32_t
 void
 ptp_remove_object_from_cache(PTPParams *params, uint32_t handle)
 {
-	int i;
+	unsigned int i;
 	PTPObject	*ob;
 	uint16_t	ret;
-
+    
 	ret = ptp_object_find (params, handle, &ob);
 	if (ret != PTP_RC_OK)
 		return;
 	i = ob-params->objects;
 	/* remove object from object info cache */
 	ptp_free_object (ob);
-
+    
 	if (i < params->nrofobjects-1)
 		memmove (ob,ob+1,(params->nrofobjects-1-i)*sizeof(PTPObject));
 	params->nrofobjects--;
@@ -5381,10 +6006,10 @@ ptp_remove_object_from_cache(PTPParams *params, uint32_t handle)
 static int _cmp_ob (const void *a, const void *b) {
 	PTPObject *oa = (PTPObject*)a;
 	PTPObject *ob = (PTPObject*)b;
-
+    
 	return oa->oid - ob->oid;
 }
-	
+
 void
 ptp_objects_sort (PTPParams *params) {
 	qsort (params->objects, params->nrofobjects, sizeof(PTPObject), _cmp_ob);
@@ -5394,7 +6019,7 @@ ptp_objects_sort (PTPParams *params) {
 uint16_t
 ptp_object_find (PTPParams *params, uint32_t handle, PTPObject **retob) {
 	PTPObject	tmpob;
-
+    
 	tmpob.oid = handle;
 	*retob = bsearch (&tmpob, params->objects, params->nrofobjects, sizeof(tmpob), _cmp_ob);
 	if (!*retob)
@@ -5405,10 +6030,10 @@ ptp_object_find (PTPParams *params, uint32_t handle, PTPObject **retob) {
 /* Binary search in objects + insert of not found. Needs "objects" to be a sorted by objectid list!  */
 uint16_t
 ptp_object_find_or_insert (PTPParams *params, uint32_t handle, PTPObject **retob) {
-	int 		begin, end, cursor;
-	int		insertat;
+	unsigned int 	begin, end, cursor;
+	unsigned int	insertat;
 	PTPObject	*newobs;
-
+    
 	if (!handle) return PTP_RC_GeneralError;
 	*retob = NULL;
 	if (!params->nrofobjects) {
@@ -5455,7 +6080,7 @@ ptp_object_find_or_insert (PTPParams *params, uint32_t handle, PTPObject **retob
 	newobs = realloc (params->objects, sizeof(PTPObject)*(params->nrofobjects+1));
 	if (!newobs) return PTP_RC_GeneralError;
 	params->objects = newobs;
-	if (insertat<=params->nrofobjects)
+	if (insertat<params->nrofobjects)
 		memmove (&params->objects[insertat+1],&params->objects[insertat],(params->nrofobjects-insertat)*sizeof(PTPObject));
 	memset(&params->objects[insertat],0,sizeof(PTPObject));
 	params->objects[insertat].oid = handle;
@@ -5465,15 +6090,15 @@ ptp_object_find_or_insert (PTPParams *params, uint32_t handle, PTPObject **retob
 }
 
 uint16_t
-ptp_object_want (PTPParams *params, uint32_t handle, int want, PTPObject **retob) {
+ptp_object_want (PTPParams *params, uint32_t handle, unsigned int want, PTPObject **retob) {
 	uint16_t	ret;
 	PTPObject	*ob;
 	/*Camera 		*camera = ((PTPData *)params->data)->camera;*/
-
+    
 	/* If GetObjectInfo is broken, force GetPropList */
 	if (params->device_flags & DEVICE_FLAG_PROPLIST_OVERRIDES_OI)
 		want |= PTPOBJECT_MTPPROPLIST_LOADED;
-
+    
 	*retob = NULL;
 	if (!handle) {
 		ptp_debug (params, "ptp_object_want: querying handle 0?\n");
@@ -5486,7 +6111,7 @@ ptp_object_want (PTPParams *params, uint32_t handle, int want, PTPObject **retob
 	/* Do we have all of it already? */
 	if ((ob->flags & want) == want)
 		return PTP_RC_OK;
-
+    
 #define X (PTPOBJECT_OBJECTINFO_LOADED|PTPOBJECT_STORAGEID_LOADED|PTPOBJECT_PARENTOBJECT_LOADED)
 	if ((want & X) && ((ob->flags & X) != X)) {
 		uint32_t	saveparent = 0;
@@ -5494,7 +6119,7 @@ ptp_object_want (PTPParams *params, uint32_t handle, int want, PTPObject **retob
 		/* One EOS issue, where getobjecthandles(root) returns obs without root flag. */
 		if (ob->flags & PTPOBJECT_PARENTOBJECT_LOADED)
 			saveparent = ob->oi.ParentObject;
-
+        
 		ret = ptp_getobjectinfo (params, handle, &ob->oi);
 		if (ret != PTP_RC_OK) {
 			/* kill it from the internal list ... */
@@ -5504,21 +6129,36 @@ ptp_object_want (PTPParams *params, uint32_t handle, int want, PTPObject **retob
 		if (!ob->oi.Filename) ob->oi.Filename=strdup("<none>");
 		if (ob->flags & PTPOBJECT_PARENTOBJECT_LOADED)
 			ob->oi.ParentObject = saveparent;
-
+        
 		/* Second EOS issue, 0x20000000 has 0x20000000 as parent */
 		if (ob->oi.ParentObject == handle)
 			ob->oi.ParentObject = 0;
+        
+		/* Read out the canon special flags */
+		if ((params->deviceinfo.VendorExtensionID == PTP_VENDOR_CANON) &&
+		    ptp_operation_issupported(params,PTP_OC_CANON_GetObjectInfoEx)) {
+			PTPCANONFolderEntry *ents = NULL;
+			uint32_t            numents = 0;
+            
+			ret = ptp_canon_getobjectinfo(params,
+                                          ob->oi.StorageID,0,
+                                          ob->oi.ParentObject,handle,
+                                          &ents,&numents
+                                          );
+			if ((ret == PTP_RC_OK) && (numents >= 1))
+				ob->canon_flags = ents[0].Flags;
+			free (ents);
+		}
+        
 		ob->flags |= X;
-
-		/* EOS bug, DCIM links back to itself. */
 	}
 #undef X
 	if (	(want & PTPOBJECT_MTPPROPLIST_LOADED) &&
 		(!(ob->flags & PTPOBJECT_MTPPROPLIST_LOADED))
-	) {
+        ) {
 		int		nrofprops = 0;
 		MTPProperties 	*props = NULL;
-
+        
 		if (params->device_flags & DEVICE_FLAG_BROKEN_MTPGETOBJPROPLIST) {
 			want &= ~PTPOBJECT_MTPPROPLIST_LOADED;
 			goto fallback;
@@ -5528,7 +6168,7 @@ ptp_object_want (PTPParams *params, uint32_t handle, int want, PTPObject **retob
 			want &= ~PTPOBJECT_MTPPROPLIST_LOADED;
 			goto fallback;
 		}
-
+        
 		ptp_debug (params, "ptp2/mtpfast: reading mtp proplist of %08x", handle);
 		/* We just want this one object, not all at once. */
 		ret = ptp_mtp_getobjectproplist_single (params, handle, &props, &nrofprops);
@@ -5536,163 +6176,163 @@ ptp_object_want (PTPParams *params, uint32_t handle, int want, PTPObject **retob
 			goto fallback;
 		ob->mtpprops = props;
 		ob->nrofmtpprops = nrofprops;
-
+        
 		/* Override the ObjectInfo data with data from properties */
 		if (params->device_flags & DEVICE_FLAG_PROPLIST_OVERRIDES_OI) {
-			int i;
+			unsigned int i;
 			MTPProperties *prop = ob->mtpprops;
-
+            
 			for (i=0;i<ob->nrofmtpprops;i++,prop++) {
 				/* in case we got all subtree objects */
 				if (prop->ObjectHandle != handle) continue;
-
+                
 				switch (prop->property) {
-				case PTP_OPC_StorageID:
-					ob->oi.StorageID = prop->propval.u32;
-					break;
-				case PTP_OPC_ObjectFormat:
-					ob->oi.ObjectFormat = prop->propval.u16;
-					break;
-				case PTP_OPC_ProtectionStatus:
-					ob->oi.ProtectionStatus = prop->propval.u16;
-					break;
-				case PTP_OPC_ObjectSize:
-					if (prop->datatype == PTP_DTC_UINT64) {
-						if (prop->propval.u64 > 0xFFFFFFFFU)
-							ob->oi.ObjectCompressedSize = 0xFFFFFFFFU;
-						else
-							ob->oi.ObjectCompressedSize = (uint32_t)prop->propval.u64;
-					} else if (prop->datatype == PTP_DTC_UINT32) {
-						ob->oi.ObjectCompressedSize = prop->propval.u32;
-					}
-					break;
-				case PTP_OPC_AssociationType:
-					ob->oi.AssociationType = prop->propval.u16;
-					break;
-				case PTP_OPC_AssociationDesc:
-					ob->oi.AssociationDesc = prop->propval.u32;
-					break;
-				case PTP_OPC_ObjectFileName:
-					if (prop->propval.str) {
-						free(ob->oi.Filename);
-						ob->oi.Filename = strdup(prop->propval.str);
-					}
-					break;
-				case PTP_OPC_DateCreated:
-					ob->oi.CaptureDate = ptp_unpack_PTPTIME(prop->propval.str);
-					break;
-				case PTP_OPC_DateModified:
-					ob->oi.ModificationDate = ptp_unpack_PTPTIME(prop->propval.str);
-					break;
-				case PTP_OPC_Keywords:
-					if (prop->propval.str) {
-						free(ob->oi.Keywords);
-						ob->oi.Keywords = strdup(prop->propval.str);
-					}
-					break;
-				case PTP_OPC_ParentObject:
-					ob->oi.ParentObject = prop->propval.u32;
-					break;
+                    case PTP_OPC_StorageID:
+                        ob->oi.StorageID = prop->propval.u32;
+                        break;
+                    case PTP_OPC_ObjectFormat:
+                        ob->oi.ObjectFormat = prop->propval.u16;
+                        break;
+                    case PTP_OPC_ProtectionStatus:
+                        ob->oi.ProtectionStatus = prop->propval.u16;
+                        break;
+                    case PTP_OPC_ObjectSize:
+                        if (prop->datatype == PTP_DTC_UINT64) {
+                            if (prop->propval.u64 > 0xFFFFFFFFU)
+                                ob->oi.ObjectCompressedSize = 0xFFFFFFFFU;
+                            else
+                                ob->oi.ObjectCompressedSize = (uint32_t)prop->propval.u64;
+                        } else if (prop->datatype == PTP_DTC_UINT32) {
+                            ob->oi.ObjectCompressedSize = prop->propval.u32;
+                        }
+                        break;
+                    case PTP_OPC_AssociationType:
+                        ob->oi.AssociationType = prop->propval.u16;
+                        break;
+                    case PTP_OPC_AssociationDesc:
+                        ob->oi.AssociationDesc = prop->propval.u32;
+                        break;
+                    case PTP_OPC_ObjectFileName:
+                        if (prop->propval.str) {
+                            free(ob->oi.Filename);
+                            ob->oi.Filename = strdup(prop->propval.str);
+                        }
+                        break;
+                    case PTP_OPC_DateCreated:
+                        ob->oi.CaptureDate = ptp_unpack_PTPTIME(prop->propval.str);
+                        break;
+                    case PTP_OPC_DateModified:
+                        ob->oi.ModificationDate = ptp_unpack_PTPTIME(prop->propval.str);
+                        break;
+                    case PTP_OPC_Keywords:
+                        if (prop->propval.str) {
+                            free(ob->oi.Keywords);
+                            ob->oi.Keywords = strdup(prop->propval.str);
+                        }
+                        break;
+                    case PTP_OPC_ParentObject:
+                        ob->oi.ParentObject = prop->propval.u32;
+                        break;
 				}
 			}
 		}
-
+        
 #if 0
 		MTPProperties 	*xpl;
 		int j;
 		PTPObjectInfo	oinfo;	
-
+        
 		memset (&oinfo,0,sizeof(oinfo));
 		/* hmm, not necessary ... only if we would use it */
 		for (j=0;j<nrofprops;j++) {
 			xpl = &props[j];
 			switch (xpl->property) {
-			case PTP_OPC_ParentObject:
-				if (xpl->datatype != PTP_DTC_UINT32) {
-					ptp_debug (params, "ptp2/mtpfast: parentobject has type 0x%x???", xpl->datatype);
-					break;
-				}
-				oinfo.ParentObject = xpl->propval.u32;
-				ptp_debug (params, "ptp2/mtpfast: parent 0x%x", xpl->propval.u32);
-				break;
-			case PTP_OPC_ObjectFormat:
-				if (xpl->datatype != PTP_DTC_UINT16) {
-					ptp_debug (params, "ptp2/mtpfast: objectformat has type 0x%x???", xpl->datatype);
-					break;
-				}
-				oinfo.ObjectFormat = xpl->propval.u16;
-				ptp_debug (params, "ptp2/mtpfast: ofc 0x%x", xpl->propval.u16);
-				break;
-			case PTP_OPC_ObjectSize:
-				switch (xpl->datatype) {
-				case PTP_DTC_UINT32:
-					oinfo.ObjectCompressedSize = xpl->propval.u32;
-					break;
-				case PTP_DTC_UINT64:
-					oinfo.ObjectCompressedSize = xpl->propval.u64;
-					break;
-				default:
-					ptp_debug (params, "ptp2/mtpfast: objectsize has type 0x%x???", xpl->datatype);
-					break;
-				}
-				ptp_debug (params, "ptp2/mtpfast: objectsize %u", xpl->propval.u32);
-				break;
-			case PTP_OPC_StorageID:
-				if (xpl->datatype != PTP_DTC_UINT32) {
-					ptp_debug (params, "ptp2/mtpfast: storageid has type 0x%x???", xpl->datatype);
-					break;
-				}
-				oinfo.StorageID = xpl->propval.u32;
-				ptp_debug (params, "ptp2/mtpfast: storageid 0x%x", xpl->propval.u32);
-				break;
-			case PTP_OPC_ProtectionStatus:/*UINT16*/
-				if (xpl->datatype != PTP_DTC_UINT16) {
-					ptp_debug (params, "ptp2/mtpfast: protectionstatus has type 0x%x???", xpl->datatype);
-					break;
-				}
-				oinfo.ProtectionStatus = xpl->propval.u16;
-				ptp_debug (params, "ptp2/mtpfast: protection 0x%x", xpl->propval.u16);
-				break;
-			case PTP_OPC_ObjectFileName:
-				if (xpl->datatype != PTP_DTC_STR) {
-					ptp_debug (params, "ptp2/mtpfast: filename has type 0x%x???", xpl->datatype);
-					break;
-				}
-				if (xpl->propval.str) {
-					ptp_debug (params, "ptp2/mtpfast: filename %s", xpl->propval.str);
-					oinfo.Filename = strdup(xpl->propval.str);
-				} else {
-					oinfo.Filename = NULL;
-				}
-				break;
-			case PTP_OPC_DateCreated:
-				if (xpl->datatype != PTP_DTC_STR) {
-					ptp_debug (params, "ptp2/mtpfast: datecreated has type 0x%x???", xpl->datatype);
-					break;
-				}
-				ptp_debug (params, "ptp2/mtpfast: capturedate %s", xpl->propval.str);
-				oinfo.CaptureDate = ptp_unpack_PTPTIME (xpl->propval.str);
-				break;
-			case PTP_OPC_DateModified:
-				if (xpl->datatype != PTP_DTC_STR) {
-					ptp_debug (params, "ptp2/mtpfast: datemodified has type 0x%x???", xpl->datatype);
-					break;
-				}
-				ptp_debug (params, "ptp2/mtpfast: moddate %s", xpl->propval.str);
-				oinfo.ModificationDate = ptp_unpack_PTPTIME (xpl->propval.str);
-				break;
-			default:
-				if ((xpl->property & 0xfff0) == 0xdc00)
-					ptp_debug (params, "ptp2/mtpfast:case %x type %x unhandled", xpl->property, xpl->datatype);
-				break;
+                case PTP_OPC_ParentObject:
+                    if (xpl->datatype != PTP_DTC_UINT32) {
+                        ptp_debug (params, "ptp2/mtpfast: parentobject has type 0x%x???", xpl->datatype);
+                        break;
+                    }
+                    oinfo.ParentObject = xpl->propval.u32;
+                    ptp_debug (params, "ptp2/mtpfast: parent 0x%x", xpl->propval.u32);
+                    break;
+                case PTP_OPC_ObjectFormat:
+                    if (xpl->datatype != PTP_DTC_UINT16) {
+                        ptp_debug (params, "ptp2/mtpfast: objectformat has type 0x%x???", xpl->datatype);
+                        break;
+                    }
+                    oinfo.ObjectFormat = xpl->propval.u16;
+                    ptp_debug (params, "ptp2/mtpfast: ofc 0x%x", xpl->propval.u16);
+                    break;
+                case PTP_OPC_ObjectSize:
+                    switch (xpl->datatype) {
+                        case PTP_DTC_UINT32:
+                            oinfo.ObjectCompressedSize = xpl->propval.u32;
+                            break;
+                        case PTP_DTC_UINT64:
+                            oinfo.ObjectCompressedSize = xpl->propval.u64;
+                            break;
+                        default:
+                            ptp_debug (params, "ptp2/mtpfast: objectsize has type 0x%x???", xpl->datatype);
+                            break;
+                    }
+                    ptp_debug (params, "ptp2/mtpfast: objectsize %u", xpl->propval.u32);
+                    break;
+                case PTP_OPC_StorageID:
+                    if (xpl->datatype != PTP_DTC_UINT32) {
+                        ptp_debug (params, "ptp2/mtpfast: storageid has type 0x%x???", xpl->datatype);
+                        break;
+                    }
+                    oinfo.StorageID = xpl->propval.u32;
+                    ptp_debug (params, "ptp2/mtpfast: storageid 0x%x", xpl->propval.u32);
+                    break;
+                case PTP_OPC_ProtectionStatus:/*UINT16*/
+                    if (xpl->datatype != PTP_DTC_UINT16) {
+                        ptp_debug (params, "ptp2/mtpfast: protectionstatus has type 0x%x???", xpl->datatype);
+                        break;
+                    }
+                    oinfo.ProtectionStatus = xpl->propval.u16;
+                    ptp_debug (params, "ptp2/mtpfast: protection 0x%x", xpl->propval.u16);
+                    break;
+                case PTP_OPC_ObjectFileName:
+                    if (xpl->datatype != PTP_DTC_STR) {
+                        ptp_debug (params, "ptp2/mtpfast: filename has type 0x%x???", xpl->datatype);
+                        break;
+                    }
+                    if (xpl->propval.str) {
+                        ptp_debug (params, "ptp2/mtpfast: filename %s", xpl->propval.str);
+                        oinfo.Filename = strdup(xpl->propval.str);
+                    } else {
+                        oinfo.Filename = NULL;
+                    }
+                    break;
+                case PTP_OPC_DateCreated:
+                    if (xpl->datatype != PTP_DTC_STR) {
+                        ptp_debug (params, "ptp2/mtpfast: datecreated has type 0x%x???", xpl->datatype);
+                        break;
+                    }
+                    ptp_debug (params, "ptp2/mtpfast: capturedate %s", xpl->propval.str);
+                    oinfo.CaptureDate = ptp_unpack_PTPTIME (xpl->propval.str);
+                    break;
+                case PTP_OPC_DateModified:
+                    if (xpl->datatype != PTP_DTC_STR) {
+                        ptp_debug (params, "ptp2/mtpfast: datemodified has type 0x%x???", xpl->datatype);
+                        break;
+                    }
+                    ptp_debug (params, "ptp2/mtpfast: moddate %s", xpl->propval.str);
+                    oinfo.ModificationDate = ptp_unpack_PTPTIME (xpl->propval.str);
+                    break;
+                default:
+                    if ((xpl->property & 0xfff0) == 0xdc00)
+                        ptp_debug (params, "ptp2/mtpfast:case %x type %x unhandled", xpl->property, xpl->datatype);
+                    break;
 			}
 		}
 		if (!oinfo.Filename)
-			/* i have one such file on my Creative */
+        /* i have one such file on my Creative */
 			oinfo.Filename = strdup("<null>");
 #endif
 		ob->flags |= PTPOBJECT_MTPPROPLIST_LOADED;
-fallback:	;
+    fallback:	;
 	}
 	if ((ob->flags & want) == want)
 		return PTP_RC_OK;

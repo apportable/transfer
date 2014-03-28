@@ -33,23 +33,23 @@ char *strndup (const char *s, size_t n);
  * Info macro
  */
 #define LIBMTP_INFO(format, args...) \
-  do { \
-    if (LIBMTP_debug != 0) \
-      fprintf(stdout, "LIBMTP %s[%d]: " format, __FUNCTION__, __LINE__, ##args); \
-	else \
-      fprintf(stdout, format, ##args); \
-  } while (0)
+do { \
+if (LIBMTP_debug != 0) \
+fprintf(stdout, "LIBMTP %s[%d]: " format, __FUNCTION__, __LINE__, ##args); \
+else \
+fprintf(stdout, format, ##args); \
+} while (0)
 
 /**
  * Error macro
  */
 #define LIBMTP_ERROR(format, args...) \
-  do { \
-    if (LIBMTP_debug != 0) \
-      fprintf(stderr, "LIBMTP %s[%d]: " format, __FUNCTION__, __LINE__, ##args); \
-	else \
-      fprintf(stderr, format, ##args); \
-  } while (0)
+do { \
+if (LIBMTP_debug != 0) \
+fprintf(stderr, "LIBMTP %s[%d]: " format, __FUNCTION__, __LINE__, ##args); \
+else \
+fprintf(stderr, format, ##args); \
+} while (0)
 
 
 #endif //__MTP__UTIL__H

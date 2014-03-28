@@ -29,21 +29,19 @@
  *   use big-endian dates.)
  *
  */
-
-#include "libmtp.h"
-#include "libusb-glue.h"
-#include "device-flags.h"
-#include "util.h"
-#include "ptp.h"
-
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <signal.h>
 
-#include <libusb.h>
-
+#include "config.h"
+#include "libmtp.h"
+#include "libusb-glue.h"
+#include "device-flags.h"
+#include "util.h"
+#include "ptp.h"
 #include "ptp-pack.c"
 
 /*
@@ -58,10 +56,10 @@
 #define USB_TIMEOUT_LONG        60000
 static inline int get_timeout(PTP_USB* ptp_usb)
 {
-  if (FLAG_LONG_TIMEOUT(ptp_usb)) {
-    return USB_TIMEOUT_LONG;
-  }
-  return USB_TIMEOUT_DEFAULT;
+    if (FLAG_LONG_TIMEOUT(ptp_usb)) {
+        return USB_TIMEOUT_LONG;
+    }
+    return USB_TIMEOUT_DEFAULT;
 }
 
 /* USB Feature selector HALT */
@@ -71,37 +69,42 @@ static inline int get_timeout(PTP_USB* ptp_usb)
 
 /* Internal data types */
 struct mtpdevice_list_struct {
-  libusb_device *device;
-  PTPParams *params;
-  PTP_USB *ptp_usb;
-  uint32_t bus_location;
-  struct mtpdevice_list_struct *next;
+    libusb_device *device;
+    PTPParams *params;
+    PTP_USB *ptp_usb;
+    uint32_t bus_location;
+    struct mtpdevice_list_struct *next;
 };
 typedef struct mtpdevice_list_struct mtpdevice_list_t;
 
 static const LIBMTP_device_entry_t mtp_device_table[] = {
-/* We include an .h file which is shared between us and libgphoto2 */
+    /* We include an .h file which is shared between us and libgphoto2 */
 #include "music-players.h"
 };
-static const int mtp_device_table_size = sizeof(mtp_device_table) / sizeof(LIBMTP_device_entry_t);
+static const int mtp_device_table_size =
+sizeof(mtp_device_table) / sizeof(LIBMTP_device_entry_t);
 
 // Local functions
-static void init_usb();
+static LIBMTP_error_number_t init_usb();
 static void close_usb(PTP_USB* ptp_usb);
 static int find_interface_and_endpoints(libusb_device *dev,
-					uint8_t *conf,
-					uint8_t *interface,
-					uint8_t *altsetting,
-					int* inep,
-					int* inep_maxpacket,
-					int* outep,
-					int* outep_maxpacket,
-					int* intep);
+                                        uint8_t *conf,
+                                        uint8_t *interface,
+                                        uint8_t *altsetting,
+                                        int* inep,
+                                        int* inep_maxpacket,
+                                        int* outep,
+                                        int* outep_maxpacket,
+                                        int* intep);
 static void clear_stall(PTP_USB* ptp_usb);
-static int init_ptp_usb (PTPParams* params, PTP_USB* ptp_usb, libusb_device* dev);
-static short ptp_write_func (unsigned long,PTPDataHandler*,void *data,unsigned long*);
-static short ptp_read_func (unsigned long,PTPDataHandler*,void *data,unsigned long*,int);
-static int usb_get_endpoint_status(PTP_USB* ptp_usb, int ep, uint16_t* status);
+static int init_ptp_usb(PTPParams* params,
+                        PTP_USB* ptp_usb, libusb_device* dev);
+static short ptp_write_func(unsigned long,
+                            PTPDataHandler*, void *data, unsigned long*);
+static short ptp_read_func (unsigned long,
+                            PTPDataHandler*, void *data, unsigned long*, int);
+static int usb_get_endpoint_status(PTP_USB* ptp_usb,
+                                   int ep, uint16_t* status);
 
 /**
  * Get a list of the supported USB devices.
@@ -121,61 +124,65 @@ static int usb_get_endpoint_status(PTP_USB* ptp_usb, int ep, uint16_t* status);
  * @return 0 if the list was successfull retrieved, any other
  *        value means failure.
  */
-int LIBMTP_Get_Supported_Devices_List(LIBMTP_device_entry_t ** const devices, int * const numdevs)
+int LIBMTP_Get_Supported_Devices_List(LIBMTP_device_entry_t ** const devices,
+                                      int * const numdevs)
 {
-  *devices = (LIBMTP_device_entry_t *) &mtp_device_table;
-  *numdevs = mtp_device_table_size;
-  return 0;
+    *devices = (LIBMTP_device_entry_t *) &mtp_device_table;
+    *numdevs = mtp_device_table_size;
+    return 0;
 }
 
 
-static void init_usb()
+static LIBMTP_error_number_t init_usb()
 {
-  /*
-   * Some additional libusb debugging please.
-   * We use the same level debug between MTP and USB.
-   */
-  libusb_init(NULL);
-
-  if ((LIBMTP_debug & LIBMTP_DEBUG_USB) != 0)
-    libusb_set_debug(NULL,9);
+    /*
+     * Some additional libusb debugging please.
+     * We use the same level debug between MTP and USB.
+     */
+    if (libusb_init(NULL) < 0) {
+        LIBMTP_ERROR("Libusb1 init failed\n");
+        return LIBMTP_ERROR_USB_LAYER;
+    }
+    
+    if ((LIBMTP_debug & LIBMTP_DEBUG_USB) != 0)
+        libusb_set_debug(NULL,9);
+    return LIBMTP_ERROR_NONE;
 }
 
 /**
- * Small recursive function to append a new usb_device to the linked list of
- * USB MTP devices
- * @param devlist dynamic linked list of pointers to usb devices with MTP
- *        properties, to be extended with new device.
+ * Small recursive function to append a new usb_device to the linked
+ * list of USB MTP devices
+ * @param devlist dynamic linked list of pointers to usb devices with
+ *        MTP properties, to be extended with new device.
  * @param newdevice the new device to add.
  * @param bus_location bus for this device.
  * @return an extended array or NULL on failure.
  */
 static mtpdevice_list_t *append_to_mtpdevice_list(mtpdevice_list_t *devlist,
-						  libusb_device *newdevice,
-
-						  uint32_t bus_location)
+                                                  libusb_device *newdevice,
+                                                  uint32_t bus_location)
 {
-  mtpdevice_list_t *new_list_entry;
-
-  new_list_entry = (mtpdevice_list_t *) malloc(sizeof(mtpdevice_list_t));
-  if (new_list_entry == NULL) {
-    return NULL;
-  }
-  // Fill in USB device, if we *HAVE* to make a copy of the device do it here.
-  new_list_entry->device = newdevice;
-  new_list_entry->bus_location = bus_location;
-  new_list_entry->next = NULL;
-
-  if (devlist == NULL) {
-    return new_list_entry;
-  } else {
-    mtpdevice_list_t *tmp = devlist;
-    while (tmp->next != NULL) {
-      tmp = tmp->next;
+    mtpdevice_list_t *new_list_entry;
+    
+    new_list_entry = (mtpdevice_list_t *) malloc(sizeof(mtpdevice_list_t));
+    if (new_list_entry == NULL) {
+        return NULL;
     }
-    tmp->next = new_list_entry;
-  }
-  return devlist;
+    // Fill in USB device, if we *HAVE* to make a copy of the device do it here.
+    new_list_entry->device = newdevice;
+    new_list_entry->bus_location = bus_location;
+    new_list_entry->next = NULL;
+    
+    if (devlist == NULL) {
+        return new_list_entry;
+    } else {
+        mtpdevice_list_t *tmp = devlist;
+        while (tmp->next != NULL) {
+            tmp = tmp->next;
+        }
+        tmp->next = new_list_entry;
+    }
+    return devlist;
 }
 
 /**
@@ -187,17 +194,17 @@ static mtpdevice_list_t *append_to_mtpdevice_list(mtpdevice_list_t *devlist,
  */
 static void free_mtpdevice_list(mtpdevice_list_t *devlist)
 {
-  mtpdevice_list_t *tmplist = devlist;
-
-  if (devlist == NULL)
+    mtpdevice_list_t *tmplist = devlist;
+    
+    if (devlist == NULL)
+        return;
+    while (tmplist != NULL) {
+        mtpdevice_list_t *tmp = tmplist;
+        tmplist = tmplist->next;
+        // Do not free() the fields (ptp_usb, params)! These are used elsewhere.
+        free(tmp);
+    }
     return;
-  while (tmplist != NULL) {
-    mtpdevice_list_t *tmp = tmplist;
-    tmplist = tmplist->next;
-    // Do not free() the fields (ptp_usb, params)! These are used elsewhere.
-    free(tmp);
-  }
-  return;
 }
 
 /**
@@ -213,266 +220,267 @@ static void free_mtpdevice_list(mtpdevice_list_t *devlist)
  */
 static int probe_device_descriptor(libusb_device *dev, FILE *dumpfile)
 {
-  libusb_device_handle *devh;
-  unsigned char buf[1024], cmd;
-  int i;
-  int ret;
-  /* This is to indicate if we find some vendor interface */
-  int found_vendor_spec_interface = 0;
-  struct libusb_device_descriptor desc;
-
-  ret = libusb_get_device_descriptor (dev, &desc);
-  if (ret != LIBUSB_SUCCESS) return 0;
-  /*
-   * Don't examine devices that are not likely to
-   * contain any MTP interface, update this the day
-   * you find some weird combination...
-   */
-  if (!(desc.bDeviceClass == LIBUSB_CLASS_PER_INTERFACE ||
-	desc.bDeviceClass == LIBUSB_CLASS_COMM ||
-	desc.bDeviceClass == LIBUSB_CLASS_PTP ||
-	desc.bDeviceClass == 0xEF ||	/* Intf. Association Desc.*/
-	desc.bDeviceClass == LIBUSB_CLASS_VENDOR_SPEC)) {
-    return 0;
-  }
-
-  /*
-   * Attempt to open Device on this port
-   *
-   * TODO: is there a way to check the number of endpoints etc WITHOUT
-   * opening the device? Some color calibration devices are REALLY
-   * sensitive to this, and I found a Canon custom scanner that doesn't
-   * like it at all either :-(
-   */
-  ret = libusb_open(dev, &devh);
-  if (ret != LIBUSB_SUCCESS) {
-    /* Could not open this device */
-    return 0;
-  }
-
-  /*
-   * Loop over the device configurations and interfaces. Nokia MTP-capable
-   * handsets (possibly others) typically have the string "MTP" in their
-   * MTP interface descriptions, that's how they can be detected, before
-   * we try the more esoteric "OS descriptors" (below).
-   */
-  for (i = 0; i < desc.bNumConfigurations; i++) {
-     uint8_t j;
-     struct libusb_config_descriptor *config;
-
-     ret = libusb_get_config_descriptor (dev, i, &config);
-     if (ret != LIBUSB_SUCCESS) {
-       LIBMTP_INFO("configdescriptor %d get failed with ret %d in probe_device_descriptor yet dev->descriptor.bNumConfigurations > 0\n", i, ret);
-       continue;
-     }
-
-     for (j = 0; j < config->bNumInterfaces; j++) {
-        int k;
-        for (k = 0; k < config->interface[j].num_altsetting; k++) {
-	  /* Current interface descriptor */
-	  const struct libusb_interface_descriptor *intf =
-	    &config->interface[j].altsetting[k];
-
-	  /*
-	   * MTP interfaces have three endpoints, two bulk and one
-	   * interrupt. Don't probe anything else.
-	   */
-	  if (intf->bNumEndpoints != 3)
-	    continue;
-
-	  /*
-	   * We only want to probe for the OS descriptor if the
-	   * device is LIBUSB_CLASS_VENDOR_SPEC or one of the interfaces
-	   * in it is, so flag if we find an interface like this.
-	   */
-	  if (intf->bInterfaceClass == LIBUSB_CLASS_VENDOR_SPEC) {
-	    found_vendor_spec_interface = 1;
-	  }
-
-	  /*
-	   * Check for Still Image Capture class with PIMA 15740 protocol,
-	   * also known as PTP
-	   */
-#if 0
-	  if (intf->bInterfaceClass == LIBUSB_CLASS_PTP
-	      && intf->bInterfaceSubClass == 0x01
-	      && intf->bInterfaceProtocol == 0x01) {
-	    if (dumpfile != NULL) {
-              fprintf(dumpfile, "Configuration %d, interface %d, altsetting %d:\n", i, j, k);
-	      fprintf(dumpfile, "   Found PTP device, check vendor "
-		      "extension...\n");
-	    }
-	    /*
-	     * This is where we may insert code to open a PTP
-	     * session and query the vendor extension ID to see
-	     * if it is 0xffffffff, i.e. MTP according to the spec.
-	     */
-	    if (was_mtp_extension) {
-	      libusb_close(devh);
-	      return 1;
-	    }
-	  }
-#endif
-
-	  /*
-	   * Next we search for the MTP substring in the interface name.
-	   * For example : "RIM MS/MTP" should work.
-	   */
-          buf[0] = '\0';
-          ret = libusb_get_string_descriptor_ascii(devh,
-				      config->interface[j].altsetting[k].iInterface,
-				      buf,
-				      1024);
-	  if (ret < 3)
-	    continue;
-          if (strstr((char *) buf, "MTP") != NULL) {
-	    if (dumpfile != NULL) {
-              fprintf(dumpfile, "Configuration %d, interface %d, altsetting %d:\n", i, j, k);
-	      fprintf(dumpfile, "   Interface description contains the string \"MTP\"\n");
-	      fprintf(dumpfile, "   Device recognized as MTP, no further probing.\n");
-	    }
-            libusb_free_config_descriptor(config);
-            libusb_close(devh);
-            return 1;
-          }
-          if (libusb_kernel_driver_active(devh, config->interface[j].altsetting[k].iInterface))
-	  {
-	    /*
-	     * Specifically avoid probing anything else than USB mass storage devices
-	     * and non-associated drivers in Linux.
-	     */
-	    if (config->interface[j].altsetting[k].bInterfaceClass !=
-		LIBUSB_CLASS_MASS_STORAGE) {
-	      LIBMTP_INFO("avoid probing device using attached kernel interface\n");
-              libusb_free_config_descriptor(config);
-	      return 0;
-	    }
-	  }
+    libusb_device_handle *devh;
+    unsigned char buf[1024], cmd;
+    int i;
+    int ret;
+    /* This is to indicate if we find some vendor interface */
+    int found_vendor_spec_interface = 0;
+    struct libusb_device_descriptor desc;
+    
+    ret = libusb_get_device_descriptor (dev, &desc);
+    if (ret != LIBUSB_SUCCESS) return 0;
+    /*
+     * Don't examine devices that are not likely to
+     * contain any MTP interface, update this the day
+     * you find some weird combination...
+     */
+    if (!(desc.bDeviceClass == LIBUSB_CLASS_PER_INTERFACE ||
+          desc.bDeviceClass == LIBUSB_CLASS_COMM ||
+          desc.bDeviceClass == LIBUSB_CLASS_PTP ||
+          desc.bDeviceClass == 0xEF ||	/* Intf. Association Desc.*/
+          desc.bDeviceClass == LIBUSB_CLASS_VENDOR_SPEC)) {
+        return 0;
+    }
+    
+    /*
+     * Attempt to open Device on this port
+     *
+     * TODO: is there a way to check the number of endpoints etc WITHOUT
+     * opening the device? Some color calibration devices are REALLY
+     * sensitive to this, and I found a Canon custom scanner that doesn't
+     * like it at all either :-(
+     */
+    ret = libusb_open(dev, &devh);
+    if (ret != LIBUSB_SUCCESS) {
+        /* Could not open this device */
+        return 0;
+    }
+    
+    /*
+     * Loop over the device configurations and interfaces. Nokia MTP-capable
+     * handsets (possibly others) typically have the string "MTP" in their
+     * MTP interface descriptions, that's how they can be detected, before
+     * we try the more esoteric "OS descriptors" (below).
+     */
+    for (i = 0; i < desc.bNumConfigurations; i++) {
+        uint8_t j;
+        struct libusb_config_descriptor *config;
+        
+        ret = libusb_get_config_descriptor (dev, i, &config);
+        if (ret != LIBUSB_SUCCESS) {
+            LIBMTP_INFO("configdescriptor %d get failed with ret %d in probe_device_descriptor yet dev->descriptor.bNumConfigurations > 0\n", i, ret);
+            continue;
         }
-     }
-     libusb_free_config_descriptor(config);
-  }
-
-  /*
-   * Only probe for OS descriptor if the device is vendor specific
-   * or one of the interfaces found is.
-   */
-  if (desc.bDeviceClass == LIBUSB_CLASS_VENDOR_SPEC ||
-      found_vendor_spec_interface) {
-
-    /* Read the special descriptor */
-    ret = libusb_get_descriptor(devh, 0x03, 0xee, buf, sizeof(buf));
-
+        
+        for (j = 0; j < config->bNumInterfaces; j++) {
+            int k;
+            for (k = 0; k < config->interface[j].num_altsetting; k++) {
+                /* Current interface descriptor */
+                const struct libusb_interface_descriptor *intf =
+                &config->interface[j].altsetting[k];
+                
+                /*
+                 * MTP interfaces have three endpoints, two bulk and one
+                 * interrupt. Don't probe anything else.
+                 */
+                if (intf->bNumEndpoints != 3)
+                    continue;
+                
+                /*
+                 * We only want to probe for the OS descriptor if the
+                 * device is LIBUSB_CLASS_VENDOR_SPEC or one of the interfaces
+                 * in it is, so flag if we find an interface like this.
+                 */
+                if (intf->bInterfaceClass == LIBUSB_CLASS_VENDOR_SPEC) {
+                    found_vendor_spec_interface = 1;
+                }
+                
+                /*
+                 * TODO: Check for Still Image Capture class with PIMA 15740
+                 * protocol, also known as PTP
+                 */
+#if 0
+                if (intf->bInterfaceClass == LIBUSB_CLASS_PTP
+                    && intf->bInterfaceSubClass == 0x01
+                    && intf->bInterfaceProtocol == 0x01) {
+                    if (dumpfile != NULL) {
+                        fprintf(dumpfile, "Configuration %d, interface %d, altsetting %d:\n", i, j, k);
+                        fprintf(dumpfile, "   Found PTP device, check vendor "
+                                "extension...\n");
+                    }
+                    /*
+                     * This is where we may insert code to open a PTP
+                     * session and query the vendor extension ID to see
+                     * if it is 0xffffffff, i.e. MTP according to the spec.
+                     */
+                    if (was_mtp_extension) {
+                        libusb_close(devh);
+                        return 1;
+                    }
+                }
+#endif
+                
+                /*
+                 * Next we search for the MTP substring in the interface name.
+                 * For example : "RIM MS/MTP" should work.
+                 */
+                buf[0] = '\0';
+                ret = libusb_get_string_descriptor_ascii(devh,
+                                                         config->interface[j].altsetting[k].iInterface,
+                                                         buf,
+                                                         1024);
+                if (ret < 3)
+                    continue;
+                if (strstr((char *) buf, "MTP") != NULL) {
+                    if (dumpfile != NULL) {
+                        fprintf(dumpfile, "Configuration %d, interface %d, altsetting %d:\n", i, j, k);
+                        fprintf(dumpfile, "   Interface description contains the string \"MTP\"\n");
+                        fprintf(dumpfile, "   Device recognized as MTP, no further probing.\n");
+                    }
+                    libusb_free_config_descriptor(config);
+                    libusb_close(devh);
+                    return 1;
+                }
+                if (libusb_kernel_driver_active(devh, config->interface[j].altsetting[k].iInterface))
+                {
+                    /*
+                     * Specifically avoid probing anything else than USB mass storage devices
+                     * and non-associated drivers in Linux.
+                     */
+                    if (config->interface[j].altsetting[k].bInterfaceClass !=
+                        LIBUSB_CLASS_MASS_STORAGE) {
+                        LIBMTP_INFO("avoid probing device using attached kernel interface\n");
+                        libusb_free_config_descriptor(config);
+                        libusb_close(devh);
+                        return 0;
+                    }
+                }
+            }
+        }
+        libusb_free_config_descriptor(config);
+    }
+    
     /*
-     * If something failed we're probably stalled to we need
-     * to clear the stall off the endpoint and say this is not
-     * MTP.
+     * Only probe for OS descriptor if the device is vendor specific
+     * or one of the interfaces found is.
      */
-    if (ret < 0) {
-      /* EP0 is the default control endpoint */
-      libusb_clear_halt (devh, 0);
-      libusb_close(devh);
-      return 0;
+    if (desc.bDeviceClass == LIBUSB_CLASS_VENDOR_SPEC ||
+        found_vendor_spec_interface) {
+        
+        /* Read the special descriptor */
+        ret = libusb_get_descriptor(devh, 0x03, 0xee, buf, sizeof(buf));
+        
+        /*
+         * If something failed we're probably stalled to we need
+         * to clear the stall off the endpoint and say this is not
+         * MTP.
+         */
+        if (ret < 0) {
+            /* EP0 is the default control endpoint */
+            libusb_clear_halt(devh, 0);
+            libusb_close(devh);
+            return 0;
+        }
+        
+        // Dump it, if requested
+        if (dumpfile != NULL && ret > 0) {
+            fprintf(dumpfile, "Microsoft device descriptor 0xee:\n");
+            data_dump_ascii(dumpfile, buf, ret, 16);
+        }
+        
+        /* Check if descriptor length is at least 10 bytes */
+        if (ret < 10) {
+            libusb_close(devh);
+            return 0;
+        }
+        
+        /* Check if this device has a Microsoft Descriptor */
+        if (!((buf[2] == 'M') && (buf[4] == 'S') &&
+              (buf[6] == 'F') && (buf[8] == 'T'))) {
+            libusb_close(devh);
+            return 0;
+        }
+        
+        /* Check if device responds to control message 1 or if there is an error */
+        cmd = buf[16];
+        ret = libusb_control_transfer (devh,
+                                       LIBUSB_ENDPOINT_IN | LIBUSB_RECIPIENT_DEVICE | LIBUSB_REQUEST_TYPE_VENDOR,
+                                       cmd,
+                                       0,
+                                       4,
+                                       buf,
+                                       sizeof(buf),
+                                       USB_TIMEOUT_DEFAULT);
+        
+        // Dump it, if requested
+        if (dumpfile != NULL && ret > 0) {
+            fprintf(dumpfile, "Microsoft device response to control message 1, CMD 0x%02x:\n", cmd);
+            data_dump_ascii(dumpfile, buf, ret, 16);
+        }
+        
+        /* If this is true, the device either isn't MTP or there was an error */
+        if (ret <= 0x15) {
+            /* TODO: If there was an error, flag it and let the user know somehow */
+            /* if(ret == -1) {} */
+            libusb_close(devh);
+            return 0;
+        }
+        
+        /* Check if device is MTP or if it is something like a USB Mass Storage
+         device with Janus DRM support */
+        if ((buf[0x12] != 'M') || (buf[0x13] != 'T') || (buf[0x14] != 'P')) {
+            libusb_close(devh);
+            return 0;
+        }
+        
+        /* After this point we are probably dealing with an MTP device */
+        
+        /*
+         * Check if device responds to control message 2, which is
+         * the extended device parameters. Most devices will just
+         * respond with a copy of the same message as for the first
+         * message, some respond with zero-length (which is OK)
+         * and some with pure garbage. We're not parsing the result
+         * so this is not very important.
+         */
+        ret = libusb_control_transfer (devh,
+                                       LIBUSB_ENDPOINT_IN | LIBUSB_RECIPIENT_DEVICE | LIBUSB_REQUEST_TYPE_VENDOR,
+                                       cmd,
+                                       0,
+                                       5,
+                                       buf,
+                                       sizeof(buf),
+                                       USB_TIMEOUT_DEFAULT);
+        
+        // Dump it, if requested
+        if (dumpfile != NULL && ret > 0) {
+            fprintf(dumpfile, "Microsoft device response to control message 2, CMD 0x%02x:\n", cmd);
+            data_dump_ascii(dumpfile, buf, ret, 16);
+        }
+        
+        /* If this is true, the device errored against control message 2 */
+        if (ret == -1) {
+            /* TODO: Implement callback function to let managing program know there
+             was a problem, along with description of the problem */
+            LIBMTP_ERROR("Potential MTP Device with VendorID:%04x and "
+                         "ProductID:%04x encountered an error responding to "
+                         "control message 2.\n"
+                         "Problems may arrise but continuing\n",
+                         desc.idVendor, desc.idProduct);
+        } else if (dumpfile != NULL && ret == 0) {
+            fprintf(dumpfile, "Zero-length response to control message 2 (OK)\n");
+        } else if (dumpfile != NULL) {
+            fprintf(dumpfile, "Device responds to control message 2 with some data.\n");
+        }
+        /* Close the USB device handle */
+        libusb_close(devh);
+        return 1;
     }
-
-    // Dump it, if requested
-    if (dumpfile != NULL && ret > 0) {
-      fprintf(dumpfile, "Microsoft device descriptor 0xee:\n");
-      data_dump_ascii(dumpfile, buf, ret, 16);
-    }
-
-    /* Check if descriptor length is at least 10 bytes */
-    if (ret < 10) {
-      libusb_close(devh);
-      return 0;
-    }
-
-    /* Check if this device has a Microsoft Descriptor */
-    if (!((buf[2] == 'M') && (buf[4] == 'S') &&
-	  (buf[6] == 'F') && (buf[8] == 'T'))) {
-      libusb_close(devh);
-      return 0;
-    }
-
-    /* Check if device responds to control message 1 or if there is an error */
-    cmd = buf[16];
-    ret = libusb_control_transfer (devh,
-			   LIBUSB_ENDPOINT_IN | LIBUSB_RECIPIENT_DEVICE | LIBUSB_REQUEST_TYPE_VENDOR,
-			   cmd,
-			   0,
-			   4,
-			   buf,
-			   sizeof(buf),
-			   USB_TIMEOUT_DEFAULT);
-
-    // Dump it, if requested
-    if (dumpfile != NULL && ret > 0) {
-      fprintf(dumpfile, "Microsoft device response to control message 1, CMD 0x%02x:\n", cmd);
-      data_dump_ascii(dumpfile, buf, ret, 16);
-    }
-
-    /* If this is true, the device either isn't MTP or there was an error */
-    if (ret <= 0x15) {
-      /* TODO: If there was an error, flag it and let the user know somehow */
-      /* if(ret == -1) {} */
-      libusb_close(devh);
-      return 0;
-    }
-
-    /* Check if device is MTP or if it is something like a USB Mass Storage
-       device with Janus DRM support */
-    if ((buf[0x12] != 'M') || (buf[0x13] != 'T') || (buf[0x14] != 'P')) {
-      libusb_close(devh);
-      return 0;
-    }
-
-    /* After this point we are probably dealing with an MTP device */
-
-    /*
-     * Check if device responds to control message 2, which is
-     * the extended device parameters. Most devices will just
-     * respond with a copy of the same message as for the first
-     * message, some respond with zero-length (which is OK)
-     * and some with pure garbage. We're not parsing the result
-     * so this is not very important.
-     */
-    ret = libusb_control_transfer (devh,
-			   LIBUSB_ENDPOINT_IN | LIBUSB_RECIPIENT_DEVICE | LIBUSB_REQUEST_TYPE_VENDOR,
-			   cmd,
-			   0,
-			   5,
-			   buf,
-			   sizeof(buf),
-			   USB_TIMEOUT_DEFAULT);
-
-    // Dump it, if requested
-    if (dumpfile != NULL && ret > 0) {
-      fprintf(dumpfile, "Microsoft device response to control message 2, CMD 0x%02x:\n", cmd);
-      data_dump_ascii(dumpfile, buf, ret, 16);
-    }
-
-    /* If this is true, the device errored against control message 2 */
-    if (ret == -1) {
-      /* TODO: Implement callback function to let managing program know there
-	 was a problem, along with description of the problem */
-      LIBMTP_ERROR("Potential MTP Device with VendorID:%04x and "
-		   "ProductID:%04x encountered an error responding to "
-		   "control message 2.\n"
-		   "Problems may arrise but continuing\n",
-		   desc.idVendor, desc.idProduct);
-    } else if (dumpfile != NULL && ret == 0) {
-      fprintf(dumpfile, "Zero-length response to control message 2 (OK)\n");
-    } else if (dumpfile != NULL) {
-      fprintf(dumpfile, "Device responds to control message 2 with some data.\n");
-    }
+    
     /* Close the USB device handle */
     libusb_close(devh);
-    return 1;
-  }
-
-  /* Close the USB device handle */
-  libusb_close(devh);
-  return 0;
+    return 0;
 }
 
 /**
@@ -490,67 +498,71 @@ static int probe_device_descriptor(libusb_device *dev, FILE *dumpfile)
  */
 static LIBMTP_error_number_t get_mtp_usb_device_list(mtpdevice_list_t ** mtp_device_list)
 {
-  ssize_t nrofdevs;
-  libusb_device **devs = NULL;
-  int ret, i;
-
-  init_usb();
-
-  nrofdevs = libusb_get_device_list (NULL, &devs);
-  for (i = 0; i < nrofdevs ; i++) {
-      libusb_device *dev = devs[i];
-      struct libusb_device_descriptor desc;
-
-      ret = libusb_get_device_descriptor(dev, &desc);
-      if (ret != LIBUSB_SUCCESS) continue;
-
-      if (desc.bDeviceClass != LIBUSB_CLASS_HUB) {
-	int i;
-        int found = 0;
-
-	// First check if we know about the device already.
-	// Devices well known to us will not have their descriptors
-	// probed, it caused problems with some devices.
-        for(i = 0; i < mtp_device_table_size; i++) {
-          if(desc.idVendor == mtp_device_table[i].vendor_id &&
-            desc.idProduct == mtp_device_table[i].product_id) {
-            /* Append this usb device to the MTP device list */
-            *mtp_device_list = append_to_mtpdevice_list(*mtp_device_list,
-							dev,
-							libusb_get_bus_number(dev));
-            found = 1;
-            break;
-          }
+    ssize_t nrofdevs;
+    libusb_device **devs = NULL;
+    int ret, i;
+    LIBMTP_error_number_t init_usb_ret;
+    
+    init_usb_ret = init_usb();
+    if (init_usb_ret != LIBMTP_ERROR_NONE)
+        return init_usb_ret;
+    
+    nrofdevs = libusb_get_device_list (NULL, &devs);
+    for (i = 0; i < nrofdevs ; i++) {
+        libusb_device *dev = devs[i];
+        struct libusb_device_descriptor desc;
+        
+        ret = libusb_get_device_descriptor(dev, &desc);
+        if (ret != LIBUSB_SUCCESS) continue;
+        
+        if (desc.bDeviceClass != LIBUSB_CLASS_HUB) {
+            int i;
+            int found = 0;
+            
+            // First check if we know about the device already.
+            // Devices well known to us will not have their descriptors
+            // probed, it caused problems with some devices.
+            for(i = 0; i < mtp_device_table_size; i++) {
+                if(desc.idVendor == mtp_device_table[i].vendor_id &&
+                   desc.idProduct == mtp_device_table[i].product_id) {
+                    /* Append this usb device to the MTP device list */
+                    *mtp_device_list = append_to_mtpdevice_list(*mtp_device_list,
+                                                                dev,
+                                                                libusb_get_bus_number(dev));
+                    found = 1;
+                    break;
+                }
+            }
+            // If we didn't know it, try probing the "OS Descriptor".
+            if (!found) {
+                if (probe_device_descriptor(dev, NULL)) {
+                    /* Append this usb device to the MTP USB Device List */
+                    *mtp_device_list = append_to_mtpdevice_list(*mtp_device_list,
+                                                                dev,
+                                                                libusb_get_bus_number(dev));
+                }
+                /*
+                 * By thomas_-_s: Also append devices that are no MTP but PTP devices
+                 * if this is commented out.
+                 */
+                /*
+                 else {
+                 // Check whether the device is no USB hub but a PTP.
+                 if ( dev->config != NULL &&dev->config->interface->altsetting->bInterfaceClass == LIBUSB_CLASS_PTP && dev->descriptor.bDeviceClass != LIBUSB_CLASS_HUB ) {
+                 *mtp_device_list = append_to_mtpdevice_list(*mtp_device_list, dev, bus->location);
+                 }
+                 }
+                 */
+            }
         }
-	// If we didn't know it, try probing the "OS Descriptor".
-        if (!found) {
-          if (probe_device_descriptor(dev, NULL)) {
-            /* Append this usb device to the MTP USB Device List */
-            *mtp_device_list = append_to_mtpdevice_list(*mtp_device_list,
-							dev,
-							libusb_get_bus_number(dev));
-          }
-          /*
-	   * By thomas_-_s: Also append devices that are no MTP but PTP devices
-	   * if this is commented out.
-	   */
-	  /*
-	  else {
-	    // Check whether the device is no USB hub but a PTP.
-	    if ( dev->config != NULL &&dev->config->interface->altsetting->bInterfaceClass == LIBUSB_CLASS_PTP && dev->descriptor.bDeviceClass != LIBUSB_CLASS_HUB ) {
-	      *mtp_device_list = append_to_mtpdevice_list(*mtp_device_list, dev, bus->location);
-	    }
-          }
-	  */
-        }
-      }
     }
-
-  /* If nothing was found we end up here. */
-  if(*mtp_device_list == NULL) {
-    return LIBMTP_ERROR_NO_DEVICE_ATTACHED;
-  }
-  return LIBMTP_ERROR_NONE;
+    libusb_free_device_list (devs, 0);
+    
+    /* If nothing was found we end up here. */
+    if(*mtp_device_list == NULL) {
+        return LIBMTP_ERROR_NO_DEVICE_ATTACHED;
+    }
+    return LIBMTP_ERROR_NONE;
 }
 
 /**
@@ -563,24 +575,27 @@ static LIBMTP_error_number_t get_mtp_usb_device_list(mtpdevice_list_t ** mtp_dev
  */
 int LIBMTP_Check_Specific_Device(int busno, int devno)
 {
-  ssize_t nrofdevs;
-  libusb_device **devs = NULL;
-  int i;
-
-  init_usb();
-
-  nrofdevs = libusb_get_device_list (NULL, &devs);
-  for (i = 0; i < nrofdevs ; i++ ) {
-
-    if (libusb_get_bus_number(devs[i]) != busno)
-      continue;
-    if (libusb_get_device_address(devs[i]) != devno)
-      continue;
-
-      if (probe_device_descriptor(devs[i], NULL))
-	return 1;
-  }
-  return 0;
+    ssize_t nrofdevs;
+    libusb_device **devs = NULL;
+    int i;
+    LIBMTP_error_number_t init_usb_ret;
+    
+    init_usb_ret = init_usb();
+    if (init_usb_ret != LIBMTP_ERROR_NONE)
+        return 0;
+    
+    nrofdevs = libusb_get_device_list (NULL, &devs);
+    for (i = 0; i < nrofdevs ; i++ ) {
+        
+        if (libusb_get_bus_number(devs[i]) != busno)
+            continue;
+        if (libusb_get_device_address(devs[i]) != devno)
+            continue;
+        
+        if (probe_device_descriptor(devs[i], NULL))
+            return 1;
+    }
+    return 0;
 }
 
 /**
@@ -599,101 +614,101 @@ int LIBMTP_Check_Specific_Device(int busno, int devno)
  * @return 0 if successful, any other value means failure.
  */
 LIBMTP_error_number_t LIBMTP_Detect_Raw_Devices(LIBMTP_raw_device_t ** devices,
-			      int * numdevs)
+                                                int * numdevs)
 {
-  mtpdevice_list_t *devlist = NULL;
-  mtpdevice_list_t *dev;
-  LIBMTP_error_number_t ret;
-  LIBMTP_raw_device_t *retdevs;
-  int devs = 0;
-  int i, j;
-
-  ret = get_mtp_usb_device_list(&devlist);
-  if (ret == LIBMTP_ERROR_NO_DEVICE_ATTACHED) {
-    *devices = NULL;
-    *numdevs = 0;
-    return ret;
-  } else if (ret != LIBMTP_ERROR_NONE) {
-    LIBMTP_ERROR("LIBMTP PANIC: get_mtp_usb_device_list() "
-	    "error code: %d on line %d\n", ret, __LINE__);
-    return ret;
-  }
-
-  // Get list size
-  dev = devlist;
-  while (dev != NULL) {
-    devs++;
-    dev = dev->next;
-  }
-  if (devs == 0) {
-    *devices = NULL;
-    *numdevs = 0;
+    mtpdevice_list_t *devlist = NULL;
+    mtpdevice_list_t *dev;
+    LIBMTP_error_number_t ret;
+    LIBMTP_raw_device_t *retdevs;
+    int devs = 0;
+    int i, j;
+    
+    ret = get_mtp_usb_device_list(&devlist);
+    if (ret == LIBMTP_ERROR_NO_DEVICE_ATTACHED) {
+        *devices = NULL;
+        *numdevs = 0;
+        return ret;
+    } else if (ret != LIBMTP_ERROR_NONE) {
+        LIBMTP_ERROR("LIBMTP PANIC: get_mtp_usb_device_list() "
+                     "error code: %d on line %d\n", ret, __LINE__);
+        return ret;
+    }
+    
+    // Get list size
+    dev = devlist;
+    while (dev != NULL) {
+        devs++;
+        dev = dev->next;
+    }
+    if (devs == 0) {
+        *devices = NULL;
+        *numdevs = 0;
+        return LIBMTP_ERROR_NONE;
+    }
+    // Conjure a device list
+    retdevs = (LIBMTP_raw_device_t *) malloc(sizeof(LIBMTP_raw_device_t) * devs);
+    if (retdevs == NULL) {
+        // Out of memory
+        *devices = NULL;
+        *numdevs = 0;
+        return LIBMTP_ERROR_MEMORY_ALLOCATION;
+    }
+    dev = devlist;
+    i = 0;
+    while (dev != NULL) {
+        int device_known = 0;
+        struct libusb_device_descriptor desc;
+        
+        libusb_get_device_descriptor (dev->device, &desc);
+        // Assign default device info
+        retdevs[i].device_entry.vendor = NULL;
+        retdevs[i].device_entry.vendor_id = desc.idVendor;
+        retdevs[i].device_entry.product = NULL;
+        retdevs[i].device_entry.product_id = desc.idProduct;
+        retdevs[i].device_entry.device_flags = 0x00000000U;
+        // See if we can locate some additional vendor info and device flags
+        for(j = 0; j < mtp_device_table_size; j++) {
+            if(desc.idVendor == mtp_device_table[j].vendor_id &&
+               desc.idProduct == mtp_device_table[j].product_id) {
+                device_known = 1;
+                retdevs[i].device_entry.vendor = mtp_device_table[j].vendor;
+                retdevs[i].device_entry.product = mtp_device_table[j].product;
+                retdevs[i].device_entry.device_flags = mtp_device_table[j].device_flags;
+                
+                // This device is known to the developers
+                LIBMTP_ERROR("Device %d (VID=%04x and PID=%04x) is a %s %s.\n",
+                             i,
+                             desc.idVendor,
+                             desc.idProduct,
+                             mtp_device_table[j].vendor,
+                             mtp_device_table[j].product);
+                break;
+            }
+        }
+        if (!device_known) {
+            // This device is unknown to the developers
+            LIBMTP_ERROR("Device %d (VID=%04x and PID=%04x) is UNKNOWN.\n",
+                         i,
+                         desc.idVendor,
+                         desc.idProduct);
+            LIBMTP_ERROR("Please report this VID/PID and the device model to the "
+                         "libmtp development team\n");
+            /*
+             * Trying to get iManufacturer or iProduct from the device at this
+             * point would require opening a device handle, that we don't want
+             * to do right now. (Takes time for no good enough reason.)
+             */
+        }
+        // Save the location on the bus
+        retdevs[i].bus_location = libusb_get_bus_number (dev->device);
+        retdevs[i].devnum = libusb_get_device_address (dev->device);
+        i++;
+        dev = dev->next;
+    }
+    *devices = retdevs;
+    *numdevs = i;
+    free_mtpdevice_list(devlist);
     return LIBMTP_ERROR_NONE;
-  }
-  // Conjure a device list
-  retdevs = (LIBMTP_raw_device_t *) malloc(sizeof(LIBMTP_raw_device_t) * devs);
-  if (retdevs == NULL) {
-    // Out of memory
-    *devices = NULL;
-    *numdevs = 0;
-    return LIBMTP_ERROR_MEMORY_ALLOCATION;
-  }
-  dev = devlist;
-  i = 0;
-  while (dev != NULL) {
-    int device_known = 0;
-    struct libusb_device_descriptor desc;
-
-    libusb_get_device_descriptor (dev->device, &desc);
-    // Assign default device info
-    retdevs[i].device_entry.vendor = NULL;
-    retdevs[i].device_entry.vendor_id = desc.idVendor;
-    retdevs[i].device_entry.product = NULL;
-    retdevs[i].device_entry.product_id = desc.idProduct;
-    retdevs[i].device_entry.device_flags = 0x00000000U;
-    // See if we can locate some additional vendor info and device flags
-    for(j = 0; j < mtp_device_table_size; j++) {
-      if(desc.idVendor == mtp_device_table[j].vendor_id &&
-	 desc.idProduct == mtp_device_table[j].product_id) {
-	device_known = 1;
-	retdevs[i].device_entry.vendor = mtp_device_table[j].vendor;
-	retdevs[i].device_entry.product = mtp_device_table[j].product;
-	retdevs[i].device_entry.device_flags = mtp_device_table[j].device_flags;
-
-	// This device is known to the developers
-//	LIBMTP_ERROR("Device %d (VID=%04x and PID=%04x) is a %s %s.\n",
-//		i,
-//		desc.idVendor,
-//		desc.idProduct,
-//		mtp_device_table[j].vendor,
-//		mtp_device_table[j].product);
-	break;
-      }
-    }
-    if (!device_known) {
-      // This device is unknown to the developers
-      LIBMTP_ERROR("Device %d (VID=%04x and PID=%04x) is UNKNOWN.\n",
-	      i,
-	      desc.idVendor,
-	      desc.idProduct);
-      LIBMTP_ERROR("Please report this VID/PID and the device model to the "
-	      "libmtp development team\n");
-      /*
-       * Trying to get iManufacturer or iProduct from the device at this
-       * point would require opening a device handle, that we don't want
-       * to do right now. (Takes time for no good enough reason.)
-       */
-    }
-    // Save the location on the bus
-    retdevs[i].bus_location = libusb_get_bus_number (dev->device);
-    retdevs[i].devnum = libusb_get_device_address (dev->device);
-    i++;
-    dev = dev->next;
-  }
-  *devices = retdevs;
-  *numdevs = i;
-  free_mtpdevice_list(devlist);
-  return LIBMTP_ERROR_NONE;
 }
 
 /**
@@ -703,33 +718,33 @@ LIBMTP_error_number_t LIBMTP_Detect_Raw_Devices(LIBMTP_raw_device_t ** devices,
  */
 void dump_usbinfo(PTP_USB *ptp_usb)
 {
-  libusb_device *dev;
-  struct libusb_device_descriptor desc;
-
-  if (libusb_kernel_driver_active(ptp_usb->handle, ptp_usb->interface))
-    LIBMTP_INFO("   Interface has a kernel driver attached.\n");
-
-  dev = libusb_get_device (ptp_usb->handle);
-  libusb_get_device_descriptor (dev, &desc);
-
-  LIBMTP_INFO("   bcdUSB: %d\n", desc.bcdUSB);
-  LIBMTP_INFO("   bDeviceClass: %d\n", desc.bDeviceClass);
-  LIBMTP_INFO("   bDeviceSubClass: %d\n", desc.bDeviceSubClass);
-  LIBMTP_INFO("   bDeviceProtocol: %d\n", desc.bDeviceProtocol);
-  LIBMTP_INFO("   idVendor: %04x\n", desc.idVendor);
-  LIBMTP_INFO("   idProduct: %04x\n", desc.idProduct);
-  LIBMTP_INFO("   IN endpoint maxpacket: %d bytes\n", ptp_usb->inep_maxpacket);
-  LIBMTP_INFO("   OUT endpoint maxpacket: %d bytes\n", ptp_usb->outep_maxpacket);
-  LIBMTP_INFO("   Raw device info:\n");
-  LIBMTP_INFO("      Bus location: %d\n", ptp_usb->rawdevice.bus_location);
-  LIBMTP_INFO("      Device number: %d\n", ptp_usb->rawdevice.devnum);
-  LIBMTP_INFO("      Device entry info:\n");
-  LIBMTP_INFO("         Vendor: %s\n", ptp_usb->rawdevice.device_entry.vendor);
-  LIBMTP_INFO("         Vendor id: 0x%04x\n", ptp_usb->rawdevice.device_entry.vendor_id);
-  LIBMTP_INFO("         Product: %s\n", ptp_usb->rawdevice.device_entry.product);
-  LIBMTP_INFO("         Vendor id: 0x%04x\n", ptp_usb->rawdevice.device_entry.product_id);
-  LIBMTP_INFO("         Device flags: 0x%08x\n", ptp_usb->rawdevice.device_entry.device_flags);
-  (void) probe_device_descriptor(dev, stdout);
+    libusb_device *dev;
+    struct libusb_device_descriptor desc;
+    
+    if (libusb_kernel_driver_active(ptp_usb->handle, ptp_usb->interface))
+        LIBMTP_INFO("   Interface has a kernel driver attached.\n");
+    
+    dev = libusb_get_device (ptp_usb->handle);
+    libusb_get_device_descriptor (dev, &desc);
+    
+    LIBMTP_INFO("   bcdUSB: %d\n", desc.bcdUSB);
+    LIBMTP_INFO("   bDeviceClass: %d\n", desc.bDeviceClass);
+    LIBMTP_INFO("   bDeviceSubClass: %d\n", desc.bDeviceSubClass);
+    LIBMTP_INFO("   bDeviceProtocol: %d\n", desc.bDeviceProtocol);
+    LIBMTP_INFO("   idVendor: %04x\n", desc.idVendor);
+    LIBMTP_INFO("   idProduct: %04x\n", desc.idProduct);
+    LIBMTP_INFO("   IN endpoint maxpacket: %d bytes\n", ptp_usb->inep_maxpacket);
+    LIBMTP_INFO("   OUT endpoint maxpacket: %d bytes\n", ptp_usb->outep_maxpacket);
+    LIBMTP_INFO("   Raw device info:\n");
+    LIBMTP_INFO("      Bus location: %d\n", ptp_usb->rawdevice.bus_location);
+    LIBMTP_INFO("      Device number: %d\n", ptp_usb->rawdevice.devnum);
+    LIBMTP_INFO("      Device entry info:\n");
+    LIBMTP_INFO("         Vendor: %s\n", ptp_usb->rawdevice.device_entry.vendor);
+    LIBMTP_INFO("         Vendor id: 0x%04x\n", ptp_usb->rawdevice.device_entry.vendor_id);
+    LIBMTP_INFO("         Product: %s\n", ptp_usb->rawdevice.device_entry.product);
+    LIBMTP_INFO("         Vendor id: 0x%04x\n", ptp_usb->rawdevice.device_entry.product_id);
+    LIBMTP_INFO("         Device flags: 0x%08x\n", ptp_usb->rawdevice.device_entry.device_flags);
+    (void) probe_device_descriptor(dev, stdout);
 }
 
 /**
@@ -742,52 +757,311 @@ void dump_usbinfo(PTP_USB *ptp_usb)
  */
 const char *get_playlist_extension(PTP_USB *ptp_usb)
 {
-  libusb_device *dev;
-  struct libusb_device_descriptor desc;
-  static char creative_pl_extension[] = ".zpl";
-  static char default_pl_extension[] = ".pla";
-
-  dev = libusb_get_device(ptp_usb->handle);
-  libusb_get_device_descriptor (dev, &desc);
-  if (desc.idVendor == 0x041e)
-    return creative_pl_extension;
-  return default_pl_extension;
+    libusb_device *dev;
+    struct libusb_device_descriptor desc;
+    static char creative_pl_extension[] = ".zpl";
+    static char default_pl_extension[] = ".pla";
+    
+    dev = libusb_get_device(ptp_usb->handle);
+    libusb_get_device_descriptor (dev, &desc);
+    if (desc.idVendor == 0x041e)
+        return creative_pl_extension;
+    return default_pl_extension;
 }
 
 static void
 libusb_glue_debug (PTPParams *params, const char *format, ...)
 {
-        va_list args;
-
-        va_start (args, format);
-        if (params->debug_func!=NULL)
-                params->debug_func (params->data, format, args);
-        else
+    va_list args;
+    
+    va_start (args, format);
+    if (params->debug_func!=NULL)
+        params->debug_func (params->data, format, args);
+    else
 	{
-                vfprintf (stderr, format, args);
+        vfprintf (stderr, format, args);
 		fprintf (stderr,"\n");
 		fflush (stderr);
 	}
-        va_end (args);
+    va_end (args);
 }
 
 static void
 libusb_glue_error (PTPParams *params, const char *format, ...)
 {
-        va_list args;
-
-        va_start (args, format);
-        if (params->error_func!=NULL)
-                params->error_func (params->data, format, args);
-        else
+    va_list args;
+    
+    va_start (args, format);
+    if (params->error_func!=NULL)
+        params->error_func (params->data, format, args);
+    else
 	{
-                vfprintf (stderr, format, args);
+        vfprintf (stderr, format, args);
 		fprintf (stderr,"\n");
 		fflush (stderr);
 	}
-        va_end (args);
+    va_end (args);
 }
 
+
+static void *ptp_event_thread_func(void *arg)
+{
+	PTP_USB *ptp_usb = (PTP_USB*)arg;
+    
+	LIBMTP_USB_DEBUG("event thread start\n");
+	ptp_usb->event_thread_run = 1;
+    
+	while (ptp_usb->event_thread_run)
+		libusb_handle_events(NULL);
+    
+	LIBMTP_USB_DEBUG("event thread quit\n");
+	return NULL;
+}
+
+static int ptp_write_async_transfer_init(PTP_USB *ptp_usb);
+static void ptp_write_async_transfer_cleanup(PTP_USB *ptp_usb);
+
+static int ptp_event_thread_init(PTP_USB *ptp_usb)
+{
+	int retval;
+    
+	LIBMTP_USB_DEBUG("ptp event thread init\n");
+	retval = pthread_mutex_init(&(ptp_usb->ptp_read_transfer_done_mutex), NULL);
+	if (retval) {
+		perror("create mutex error\n");
+		return 1;
+	}
+	retval = pthread_cond_init(&(ptp_usb->ptp_read_transfer_done_cv), NULL);
+	if (retval) {
+		perror("create codintion variable error\n");
+		return 1;
+	}
+    
+	ptp_usb->ptp_read_transfer_done_flag = 0;
+    
+	retval = pthread_mutex_init(&(ptp_usb->ptp_write_transfer_mutex), NULL);
+	if (retval) {
+		perror("create mutex error\n");
+		return 1;
+	}
+	retval = pthread_cond_init(&(ptp_usb->ptp_write_transfer_cv), NULL);
+	if (retval) {
+		perror("create codintion variable error\n");
+		return 1;
+	}
+    
+	ptp_usb->ptp_write_transfer_done_flag = 0;
+	ptp_usb->event_thread_run = 0;
+	ptp_usb->ptp_event_thread_tid = 0;
+    
+	if (!ptp_usb->ptp_event_thread_tid) {
+		if (pthread_create(&(ptp_usb->ptp_event_thread_tid), NULL, ptp_event_thread_func, ptp_usb) != 0) {
+			perror("create event thread fail\n");
+			return -1;
+		}
+	}
+    
+	retval = ptp_write_async_transfer_init(ptp_usb);
+	if (retval)
+		perror("init write async error");
+	return 0;
+    
+}
+
+static void ptp_event_thread_cleanup(PTP_USB *ptp_usb)
+{
+	ptp_write_async_transfer_cleanup(ptp_usb);
+	pthread_mutex_destroy(&(ptp_usb->ptp_read_transfer_done_mutex));
+	pthread_cond_destroy(&(ptp_usb->ptp_read_transfer_done_cv));
+	pthread_mutex_destroy(&(ptp_usb->ptp_write_transfer_mutex));
+	pthread_cond_destroy(&(ptp_usb->ptp_write_transfer_cv));
+	pthread_join(ptp_usb->ptp_event_thread_tid, NULL);
+	ptp_usb->ptp_event_thread_tid = 0;
+	LIBMTP_USB_DEBUG("finish cleanup event thread\n");
+}
+
+static void ptp_read_transfer_cb(struct libusb_transfer *transfer)
+{
+	PTP_USB *ptp_usb = (PTP_USB*)transfer->user_data;
+    
+	pthread_mutex_lock(&(ptp_usb->ptp_read_transfer_done_mutex));
+	ptp_usb->ptp_read_transfer_done_flag = 1;
+	pthread_cond_signal(&(ptp_usb->ptp_read_transfer_done_cv));
+	pthread_mutex_unlock(&(ptp_usb->ptp_read_transfer_done_mutex));
+}
+
+#define READ_ASYNC_BLOCK_SIZE (0x4000*8)
+
+static short
+ptp_read_async_func (
+                     unsigned long size, PTPDataHandler *handler,void *data,
+                     unsigned long *readbytes,
+                     int readzero
+                     ) {
+    PTP_USB *ptp_usb = (PTP_USB *)data;
+    unsigned long toread = 0;
+    int ret = 0;
+    int xread = 0;
+    unsigned long curread = 0;
+    unsigned long written;
+    unsigned char *bytes[2];
+    unsigned int transfer_index = 0;
+    int expect_terminator_byte = 0;
+    struct libusb_transfer *usb_read_transfer[2];
+    struct libusb_transfer *usb_ongoing_transfer = NULL;
+    struct libusb_transfer *usb_done_transfer = NULL;
+    unsigned long sync_written = 0;
+    
+    // This is the largest block we'll need to read in.
+    bytes[0] = malloc(READ_ASYNC_BLOCK_SIZE);
+    if (!bytes[0])
+        return PTP_ERROR_IO;
+    bytes[1] = malloc(READ_ASYNC_BLOCK_SIZE);
+    if (!bytes[1]) {
+        if (bytes[0])
+            free(bytes[0]);
+        return PTP_ERROR_IO;
+    }
+    
+    usb_read_transfer[0] = libusb_alloc_transfer(0);
+    if (!usb_read_transfer[0])
+        return PTP_ERROR_IO;
+    usb_read_transfer[1] = libusb_alloc_transfer(0);
+    if (!usb_read_transfer[1]) {
+        if (usb_read_transfer[0])
+            libusb_free_transfer(usb_read_transfer[0]);
+        return PTP_ERROR_IO;
+    }
+    while (curread < size || usb_done_transfer) {
+        
+        LIBMTP_USB_DEBUG("Remaining size to read: 0x%04lx bytes\n", size - curread);
+        
+        // check equal to condition here
+        if (size - curread < READ_ASYNC_BLOCK_SIZE)
+        {
+            // this is the last packet
+            toread = size - curread;
+            // this is equivalent to zero read for these devices
+            if (readzero && FLAG_NO_ZERO_READS(ptp_usb) && toread % 64 == 0) {
+                toread += 1;
+                expect_terminator_byte = 1;
+            }
+        }
+        else
+            toread = READ_ASYNC_BLOCK_SIZE;
+        
+        
+        LIBMTP_USB_DEBUG("Reading in 0x%04lx bytes\n", toread);
+        
+        if (toread > 0) {
+            transfer_index = (transfer_index + 1) % 2;
+            libusb_fill_bulk_transfer(usb_read_transfer[transfer_index],
+                                      ptp_usb->handle,
+                                      ptp_usb->inep,
+                                      bytes[transfer_index],
+                                      toread,
+                                      ptp_read_transfer_cb,
+                                      ptp_usb,
+                                      2000);
+            ptp_usb->ptp_read_transfer_done_flag = 0;
+            ret = libusb_submit_transfer(usb_read_transfer[transfer_index]);
+            if (ret)
+                perror("submit error:");
+            usb_ongoing_transfer = usb_read_transfer[transfer_index];
+        }
+        
+        if (usb_done_transfer) {
+            int putfunc_ret = handler->putfunc(NULL, handler->priv, xread, usb_done_transfer->buffer, &written);
+            sync_written += written;
+            if (putfunc_ret != PTP_RC_OK)
+                return putfunc_ret;
+            usb_done_transfer = NULL;
+        }
+        
+        if (usb_ongoing_transfer) {
+            pthread_mutex_lock(&(ptp_usb->ptp_read_transfer_done_mutex));
+            while (!ptp_usb->ptp_read_transfer_done_flag) {
+                pthread_cond_wait(&(ptp_usb->ptp_read_transfer_done_cv), &(ptp_usb->ptp_read_transfer_done_mutex));
+            }
+            pthread_mutex_unlock(&(ptp_usb->ptp_read_transfer_done_mutex));
+            
+            if (usb_ongoing_transfer->status == LIBUSB_TRANSFER_COMPLETED) {
+                xread = usb_ongoing_transfer->actual_length;
+                LIBMTP_USB_DEBUG("Result of read: 0x%04x (%d bytes)\n", ret, xread);
+                
+                LIBMTP_USB_DEBUG("<==USB IN\n");
+                if (xread == 0)
+                    LIBMTP_USB_DEBUG("Zero Read\n");
+                else
+                    LIBMTP_USB_DATA(usb_ongoing_transfer->buffer, xread, 16);
+                
+                // want to discard extra byte
+                if (expect_terminator_byte && xread == toread)
+			    {
+				    LIBMTP_USB_DEBUG("<==USB IN\nDiscarding extra byte\n");
+				    xread--;
+			    }
+                ptp_usb->current_transfer_complete += xread;
+                curread += xread;
+                usb_done_transfer = usb_ongoing_transfer;
+                usb_ongoing_transfer = NULL;
+            } else {
+                perror("transfer error:");
+                return PTP_ERROR_IO;
+            }
+        }
+        
+        // Increase counters, call callback
+        if (ptp_usb->callback_active) {
+            if (ptp_usb->current_transfer_complete >= ptp_usb->current_transfer_total) {
+                // send last update and disable callback.
+                ptp_usb->current_transfer_complete = ptp_usb->current_transfer_total;
+                ptp_usb->callback_active = 0;
+            }
+            if (ptp_usb->current_transfer_callback != NULL) {
+                int ret;
+                ret = ptp_usb->current_transfer_callback(ptp_usb->current_transfer_complete,
+                                                         ptp_usb->current_transfer_total,
+                                                         ptp_usb->current_transfer_callback_data);
+                if (ret != 0) {
+                    return PTP_ERROR_CANCEL;
+                }
+            }
+        }
+        
+        if (xread < toread) /* short reads are common */
+            break;
+    }
+    
+    if (readbytes) *readbytes = curread;
+    free (bytes[0]);
+    free (bytes[1]);
+    libusb_free_transfer(usb_read_transfer[0]);
+    libusb_free_transfer(usb_read_transfer[1]);
+    
+    // there might be a zero packet waiting for us...
+    if (readzero &&
+        !FLAG_NO_ZERO_READS(ptp_usb) &&
+        curread % ptp_usb->outep_maxpacket == 0) {
+        unsigned char temp;
+        int zeroresult = 0, xread;
+        
+        //printf("zero read\n");
+        LIBMTP_USB_DEBUG("<==USB IN\n");
+        LIBMTP_USB_DEBUG("Zero Read\n");
+        
+        zeroresult = USB_BULK_READ(ptp_usb->handle,
+                                   ptp_usb->inep,
+                                   &temp,
+                                   0,
+                                   &xread,
+                                   ptp_usb->timeout);
+        if (zeroresult != LIBUSB_SUCCESS)
+            LIBMTP_INFO("LIBMTP panic: unable to read in zero packet, response 0x%04x", zeroresult);
+    }
+    
+    return PTP_RC_OK;
+}
 
 /*
  * ptp_read_func() and ptp_write_func() are
@@ -815,228 +1089,488 @@ libusb_glue_error (PTPParams *params, const char *format, ...)
 #define CONTEXT_BLOCK_SIZE    CONTEXT_BLOCK_SIZE_1+CONTEXT_BLOCK_SIZE_2
 static short
 ptp_read_func (
-	unsigned long size, PTPDataHandler *handler,void *data,
-	unsigned long *readbytes,
-	int readzero
-) {
-  PTP_USB *ptp_usb = (PTP_USB *)data;
-  unsigned long toread = 0;
-  int ret = 0;
-  int xread;
-  unsigned long curread = 0;
-  unsigned long written;
-  unsigned char *bytes;
-  int expect_terminator_byte = 0;
-
-  // This is the largest block we'll need to read in.
-  bytes = malloc(CONTEXT_BLOCK_SIZE);
-  while (curread < size) {
-
-    LIBMTP_USB_DEBUG("Remaining size to read: 0x%04lx bytes\n", size - curread);
-
-    // check equal to condition here
-    if (size - curread < CONTEXT_BLOCK_SIZE)
-    {
-      // this is the last packet
-      toread = size - curread;
-      // this is equivalent to zero read for these devices
-      if (readzero && FLAG_NO_ZERO_READS(ptp_usb) && toread % 64 == 0) {
-        toread += 1;
-        expect_terminator_byte = 1;
-      }
+               unsigned long size, PTPDataHandler *handler,void *data,
+               unsigned long *readbytes,
+               int readzero
+               ) {
+    PTP_USB *ptp_usb = (PTP_USB *)data;
+    unsigned long toread = 0;
+    int ret = 0;
+    int xread;
+    unsigned long curread = 0;
+    unsigned long written;
+    unsigned char *bytes;
+    int expect_terminator_byte = 0;
+    unsigned long usb_inep_maxpacket_size;
+    unsigned long context_block_size_1;
+    unsigned long context_block_size_2;
+    uint16_t ptp_dev_vendor_id = ptp_usb->rawdevice.device_entry.vendor_id;
+    
+    //"iRiver" device special handling
+    if (ptp_dev_vendor_id == 0x4102 || ptp_dev_vendor_id == 0x1006) {
+        usb_inep_maxpacket_size = ptp_usb->inep_maxpacket;
+        if (usb_inep_maxpacket_size == 0x400) {
+            context_block_size_1 = CONTEXT_BLOCK_SIZE_1 - 0x200;
+            context_block_size_2 = CONTEXT_BLOCK_SIZE_2 + 0x200;
+        }
+        else {
+            context_block_size_1 = CONTEXT_BLOCK_SIZE_1;
+            context_block_size_2 = CONTEXT_BLOCK_SIZE_2;
+        }
     }
-    else if (curread == 0)
-      // we are first packet, but not last packet
-      toread = CONTEXT_BLOCK_SIZE_1;
-    else if (toread == CONTEXT_BLOCK_SIZE_1)
-      toread = CONTEXT_BLOCK_SIZE_2;
-    else if (toread == CONTEXT_BLOCK_SIZE_2)
-      toread = CONTEXT_BLOCK_SIZE_1;
-    else
-      LIBMTP_INFO("unexpected toread size 0x%04x, 0x%04x remaining bytes\n", 
-	     (unsigned int) toread, (unsigned int) (size-curread));
-
-    LIBMTP_USB_DEBUG("Reading in 0x%04lx bytes\n", toread);
-
-    ret = USB_BULK_READ(ptp_usb->handle,
-			   ptp_usb->inep,
-			   bytes,
-			   toread,
-                           &xread,
-			   ptp_usb->timeout);
-
-    LIBMTP_USB_DEBUG("Result of read: 0x%04x (%d bytes)\n", ret, xread);
-
-    if (ret != LIBUSB_SUCCESS)
-      return PTP_ERROR_IO;
-
-    LIBMTP_USB_DEBUG("<==USB IN\n");
-    if (xread == 0)
-      LIBMTP_USB_DEBUG("Zero Read\n");
-    else
-      LIBMTP_USB_DATA(bytes, xread, 16);
-
-    // want to discard extra byte
-    if (expect_terminator_byte && xread == toread)
-    {
-      LIBMTP_USB_DEBUG("<==USB IN\nDiscarding extra byte\n");
-
-      xread--;
+    // This is the largest block we'll need to read in.
+    bytes = malloc(CONTEXT_BLOCK_SIZE);
+    while (curread < size) {
+        
+        LIBMTP_USB_DEBUG("Remaining size to read: 0x%04lx bytes\n", size - curread);
+        
+        // check equal to condition here
+        if (size - curread < CONTEXT_BLOCK_SIZE)
+        {
+            // this is the last packet
+            toread = size - curread;
+            // this is equivalent to zero read for these devices
+            if (readzero && FLAG_NO_ZERO_READS(ptp_usb) && toread % 64 == 0) {
+                toread += 1;
+                expect_terminator_byte = 1;
+            }
+        }
+        else if (ptp_dev_vendor_id == 0x4102 || ptp_dev_vendor_id == 0x1006) {
+            //"iRiver" device special handling
+            if (curread == 0)
+                // we are first packet, but not last packet
+                toread = context_block_size_1;
+            else if (toread == context_block_size_1)
+                toread = context_block_size_2;
+            else if (toread == context_block_size_2)
+                toread = context_block_size_1;
+            else
+                LIBMTP_INFO("unexpected toread size 0x%04x, 0x%04x remaining bytes\n",
+                            (unsigned int) toread, (unsigned int) (size-curread));
+        }
+        else
+            toread = CONTEXT_BLOCK_SIZE;
+        
+        LIBMTP_USB_DEBUG("Reading in 0x%04lx bytes\n", toread);
+        
+        ret = USB_BULK_READ(ptp_usb->handle,
+                            ptp_usb->inep,
+                            bytes,
+                            toread,
+                            &xread,
+                            ptp_usb->timeout);
+        
+        LIBMTP_USB_DEBUG("Result of read: 0x%04x (%d bytes)\n", ret, xread);
+        
+        if (ret != LIBUSB_SUCCESS)
+            return PTP_ERROR_IO;
+        
+        LIBMTP_USB_DEBUG("<==USB IN\n");
+        if (xread == 0)
+            LIBMTP_USB_DEBUG("Zero Read\n");
+        else
+            LIBMTP_USB_DATA(bytes, xread, 16);
+        
+        // want to discard extra byte
+        if (expect_terminator_byte && xread == toread)
+        {
+            LIBMTP_USB_DEBUG("<==USB IN\nDiscarding extra byte\n");
+            
+            xread--;
+        }
+        
+        int putfunc_ret = handler->putfunc(NULL, handler->priv, xread, bytes, &written);
+        if (putfunc_ret != PTP_RC_OK)
+            return putfunc_ret;
+        
+        ptp_usb->current_transfer_complete += xread;
+        curread += xread;
+        
+        // Increase counters, call callback
+        if (ptp_usb->callback_active) {
+            if (ptp_usb->current_transfer_complete >= ptp_usb->current_transfer_total) {
+                // send last update and disable callback.
+                ptp_usb->current_transfer_complete = ptp_usb->current_transfer_total;
+                ptp_usb->callback_active = 0;
+            }
+            if (ptp_usb->current_transfer_callback != NULL) {
+                int ret;
+                ret = ptp_usb->current_transfer_callback(ptp_usb->current_transfer_complete,
+                                                         ptp_usb->current_transfer_total,
+                                                         ptp_usb->current_transfer_callback_data);
+                if (ret != 0) {
+                    return PTP_ERROR_CANCEL;
+                }
+            }
+        }
+        
+        if (xread < toread) /* short reads are common */
+            break;
     }
+    if (readbytes) *readbytes = curread;
+    free (bytes);
+    
+    // there might be a zero packet waiting for us...
+    if (readzero &&
+        !FLAG_NO_ZERO_READS(ptp_usb) &&
+        curread % ptp_usb->outep_maxpacket == 0) {
+        unsigned char temp;
+        int zeroresult = 0, xread;
+        
+        LIBMTP_USB_DEBUG("<==USB IN\n");
+        LIBMTP_USB_DEBUG("Zero Read\n");
+        
+        zeroresult = USB_BULK_READ(ptp_usb->handle,
+                                   ptp_usb->inep,
+                                   &temp,
+                                   0,
+                                   &xread,
+                                   ptp_usb->timeout);
+        if (zeroresult != LIBUSB_SUCCESS)
+            LIBMTP_INFO("LIBMTP panic: unable to read in zero packet, response 0x%04x", zeroresult);
+    }
+    
+    return PTP_RC_OK;
+}
 
-    int putfunc_ret = handler->putfunc(NULL, handler->priv, xread, bytes, &written);
-    if (putfunc_ret != PTP_RC_OK)
-      return putfunc_ret;
+#define WRITE_ASYNC_BLOCK_SIZE (0x4000)
 
-    ptp_usb->current_transfer_complete += xread;
-    curread += xread;
 
-    // Increase counters, call callback
-    if (ptp_usb->callback_active) {
-      if (ptp_usb->current_transfer_complete >= ptp_usb->current_transfer_total) {
-	// send last update and disable callback.
-	ptp_usb->current_transfer_complete = ptp_usb->current_transfer_total;
-	ptp_usb->callback_active = 0;
-      }
-      if (ptp_usb->current_transfer_callback != NULL) {
-	int ret;
-	ret = ptp_usb->current_transfer_callback(ptp_usb->current_transfer_complete,
-						 ptp_usb->current_transfer_total,
-						 ptp_usb->current_transfer_callback_data);
-	if (ret != 0) {
-	  return PTP_ERROR_CANCEL;
+static struct ptp_write_td *ptp_get_write_transfer(PTP_USB *ptp_usb)
+{
+	struct ptp_write_td *write_td;
+    
+	pthread_mutex_lock(&(ptp_usb->ptp_write_transfer_mutex));
+	if (ptp_usb->p_write_head_td) {
+		if (ptp_usb->p_write_head_td == ptp_usb->p_write_tail_td) {
+			/* hit the last one */
+			ptp_usb->p_write_tail_td = NULL;
+			ptp_usb->ptp_write_transfer_done_flag = 0;
+		}
+		write_td = ptp_usb->p_write_head_td;
+		ptp_usb->p_write_head_td = ptp_usb->p_write_head_td->next;
+		write_td->next = NULL;
+	} else {
+		/* empty list */
+		while (!(ptp_usb->ptp_write_transfer_done_flag)) {
+			pthread_cond_wait(&(ptp_usb->ptp_write_transfer_cv), &(ptp_usb->ptp_write_transfer_mutex));
+		}
+		write_td = ptp_usb->p_write_head_td;
+		ptp_usb->p_write_head_td = ptp_usb->p_write_head_td->next;
+        
+		if (ptp_usb->p_write_head_td == NULL) {
+			ptp_usb->p_write_tail_td = NULL;
+			ptp_usb->ptp_write_transfer_done_flag = 0;
+		}
+		write_td->next = NULL;
 	}
-      }
+	pthread_mutex_unlock(&(ptp_usb->ptp_write_transfer_mutex));
+    
+	return write_td;
+}
+
+static void ptp_giveback_write_transfer(PTP_USB *ptp_usb, struct ptp_write_td *ptp_write_transfer)
+{
+	pthread_mutex_lock(&(ptp_usb->ptp_write_transfer_mutex));
+	if (ptp_usb->p_write_tail_td) {
+		ptp_usb->p_write_tail_td->next = ptp_write_transfer;
+		ptp_usb->p_write_tail_td = ptp_write_transfer;
+		ptp_write_transfer->next = NULL;
+	} else {
+		/* empty list */
+		ptp_usb->p_write_tail_td = ptp_write_transfer;
+		ptp_usb->p_write_head_td = ptp_usb->p_write_tail_td;
+		ptp_write_transfer->next = NULL;
+		ptp_usb->ptp_write_transfer_done_flag = 1;
+		pthread_cond_signal(&(ptp_usb->ptp_write_transfer_cv));
+	}
+    
+	pthread_mutex_unlock(&(ptp_usb->ptp_write_transfer_mutex));
+}
+
+static struct ptp_write_td *libusb_transfer_to_td(PTP_USB *ptp_usb, struct libusb_transfer *transfer)
+{
+	int i = 0;
+    
+	for (i = 0; i < WRITE_TRANSFER_NUM; i++) {
+		if (ptp_usb->write_td_array[i].transfer == transfer) {
+			return &(ptp_usb->write_td_array[i]);
+		}
+	}
+	perror("no corresponding td found");
+	return NULL;
+}
+
+static void ptp_write_transfer_cb(struct libusb_transfer *transfer)
+{
+	PTP_USB *ptp_usb = (PTP_USB*)transfer->user_data;
+	struct ptp_write_td *giveback_td;
+    
+	giveback_td = libusb_transfer_to_td(ptp_usb, transfer);
+	ptp_giveback_write_transfer(ptp_usb, giveback_td);
+}
+
+static int ptp_write_async_transfer_init(PTP_USB *ptp_usb)
+{
+	int i;
+    
+	for (i = 0; i < WRITE_TRANSFER_NUM; i++) {
+		ptp_usb->bytes[i] = malloc(WRITE_ASYNC_BLOCK_SIZE);
+		if (!ptp_usb->bytes[i]) {
+			perror("alloc write buffer error");
+			goto init_err;
+		}
+	}
+    
+	for (i = 0; i < WRITE_TRANSFER_NUM; i++) {
+		ptp_usb->write_td_array[i].transfer = libusb_alloc_transfer(0);
+		if (!ptp_usb->write_td_array[i].transfer) {
+			perror("alloc write transfer error");
+			goto init_err;
+		}
+		ptp_usb->write_td_array[i].buffer = ptp_usb->bytes[i];
+	}
+	return 0;
+init_err:
+	for (i = 0; i < WRITE_TRANSFER_NUM; i++) {
+		if (ptp_usb->bytes[i]) {
+			free(ptp_usb->bytes[i]);
+			ptp_usb->bytes[i] = NULL;
+		}
+		if (ptp_usb->write_td_array[i].transfer) {
+			libusb_free_transfer(ptp_usb->write_td_array[i].transfer);
+			ptp_usb->write_td_array[i].transfer = NULL;
+		}
+	}
+	return -1;
+}
+
+static void ptp_write_async_transfer_cleanup(PTP_USB *ptp_usb)
+{
+	int i;
+    
+	for (i = 0; i < WRITE_TRANSFER_NUM; i++) {
+		if (ptp_usb->write_td_array[i].transfer) {
+			libusb_free_transfer(ptp_usb->write_td_array[i].transfer);
+			ptp_usb->write_td_array[i].transfer = NULL;
+		}
+		if (ptp_usb->write_td_array[i].buffer) {
+			free(ptp_usb->write_td_array[i].buffer);
+			ptp_usb->write_td_array[i].buffer = NULL;
+		}
+	}
+}
+
+static short
+ptp_write_async_func (
+                      unsigned long   size,
+                      PTPDataHandler  *handler,
+                      void            *data,
+                      unsigned long   *written
+                      ) {
+    PTP_USB *ptp_usb = (PTP_USB *)data;
+    unsigned long towrite = 0;
+    int ret = 0;
+    unsigned long curwrite = 0;
+    struct ptp_write_td *write_td = NULL;
+    int i;
+    
+    for (i = 0; i < WRITE_TRANSFER_NUM; i++) {
+        if (i < WRITE_TRANSFER_NUM - 1)
+            ptp_usb->write_td_array[i].next = &(ptp_usb->write_td_array[i + 1]);
+        else
+            ptp_usb->write_td_array[i].next = NULL;
     }
-
-    if (xread < toread) /* short reads are common */
-      break;
-  }
-  if (readbytes) *readbytes = curread;
-  free (bytes);
-
-  // there might be a zero packet waiting for us...
-  if (readzero &&
-      !FLAG_NO_ZERO_READS(ptp_usb) &&
-      curread % ptp_usb->outep_maxpacket == 0) {
-    unsigned char temp;
-    int zeroresult = 0, xread;
-
-    LIBMTP_USB_DEBUG("<==USB IN\n");
-    LIBMTP_USB_DEBUG("Zero Read\n");
-
-    zeroresult = USB_BULK_READ(ptp_usb->handle,
-			       ptp_usb->inep,
-			       &temp,
-			       0,
-                               &xread,
-			       ptp_usb->timeout);
-    if (zeroresult != LIBUSB_SUCCESS)
-      LIBMTP_INFO("LIBMTP panic: unable to read in zero packet, response 0x%04x", zeroresult);
-  }
-
-  return PTP_RC_OK;
+    ptp_usb->p_write_head_td = &(ptp_usb->write_td_array[0]);
+    ptp_usb->p_write_tail_td = &(ptp_usb->write_td_array[WRITE_TRANSFER_NUM - 1]);
+    
+    while (curwrite < size) {
+        towrite = size-curwrite;
+        if (towrite > WRITE_ASYNC_BLOCK_SIZE) {
+            towrite = WRITE_ASYNC_BLOCK_SIZE;
+        } else {
+            // This magic makes packets the same size that WMP send them.
+            if (towrite > ptp_usb->outep_maxpacket && towrite % ptp_usb->outep_maxpacket != 0) {
+                towrite -= towrite % ptp_usb->outep_maxpacket;
+            }
+        }
+        write_td = ptp_get_write_transfer(ptp_usb);
+        if (!write_td) {
+            perror("get NULL write transfer");
+            return PTP_ERROR_IO;
+        }
+        int getfunc_ret = handler->getfunc(NULL, handler->priv,towrite,write_td->buffer,&towrite);
+        if (getfunc_ret != PTP_RC_OK) {
+            return getfunc_ret;
+        }
+        
+        libusb_fill_bulk_transfer(write_td->transfer,
+                                  ptp_usb->handle,
+                                  ptp_usb->outep,
+                                  write_td->buffer,
+                                  towrite,
+                                  ptp_write_transfer_cb,
+                                  ptp_usb,
+                                  2000);
+        ret = libusb_submit_transfer(write_td->transfer);
+        if (ret)
+            perror("submit write transfer error:");
+        
+        
+        LIBMTP_USB_DEBUG("USB OUT==>\n");
+        
+        // Increase counters
+        ptp_usb->current_transfer_complete += towrite;
+        curwrite += towrite;
+        // call callback
+        if (ptp_usb->callback_active) {
+            if (ptp_usb->current_transfer_complete >= ptp_usb->current_transfer_total) {
+                // send last update and disable callback.
+                ptp_usb->current_transfer_complete = ptp_usb->current_transfer_total;
+                ptp_usb->callback_active = 0;
+            }
+            if (ptp_usb->current_transfer_callback != NULL) {
+                int ret;
+                ret = ptp_usb->current_transfer_callback(ptp_usb->current_transfer_complete,
+                                                         ptp_usb->current_transfer_total,
+                                                         ptp_usb->current_transfer_callback_data);
+                if (ret != 0) {
+                    return PTP_ERROR_CANCEL;
+                }
+            }
+        }
+        
+    }
+    
+    if (written) {
+        *written = curwrite;
+    }
+    
+    // If this is the last transfer send a zero write if required
+    if (ptp_usb->current_transfer_complete >= ptp_usb->current_transfer_total) {
+        if ((towrite % ptp_usb->outep_maxpacket) == 0) {
+            int xwritten;
+            
+            LIBMTP_USB_DEBUG("USB OUT==>\n");
+            LIBMTP_USB_DEBUG("Zero Write\n");
+            ret =USB_BULK_WRITE(ptp_usb->handle,
+                                ptp_usb->outep,
+                                (unsigned char *) "x",
+                                0,
+                                &xwritten,
+                                ptp_usb->timeout);
+        }
+    }
+    
+    if (ret != LIBUSB_SUCCESS)
+        return PTP_ERROR_IO;
+    
+    return PTP_RC_OK;
 }
 
 static short
 ptp_write_func (
-        unsigned long   size,
-        PTPDataHandler  *handler,
-        void            *data,
-        unsigned long   *written
-) {
-  PTP_USB *ptp_usb = (PTP_USB *)data;
-  unsigned long towrite = 0;
-  int ret = 0;
-  unsigned long curwrite = 0;
-  unsigned char *bytes;
-
-  // This is the largest block we'll need to read in.
-  bytes = malloc(CONTEXT_BLOCK_SIZE);
-  if (!bytes) {
-    return PTP_ERROR_IO;
-  }
-  while (curwrite < size) {
-    unsigned long usbwritten = 0;
-    int xwritten;
-
-    towrite = size-curwrite;
-    if (towrite > CONTEXT_BLOCK_SIZE) {
-      towrite = CONTEXT_BLOCK_SIZE;
-    } else {
-      // This magic makes packets the same size that WMP send them.
-      if (towrite > ptp_usb->outep_maxpacket && towrite % ptp_usb->outep_maxpacket != 0) {
-        towrite -= towrite % ptp_usb->outep_maxpacket;
-      }
+                unsigned long   size,
+                PTPDataHandler  *handler,
+                void            *data,
+                unsigned long   *written
+                ) {
+    PTP_USB *ptp_usb = (PTP_USB *)data;
+    unsigned long towrite = 0;
+    int ret = 0;
+    unsigned long curwrite = 0;
+    unsigned char *bytes;
+    
+    // This is the largest block we'll need to read in.
+    bytes = malloc(CONTEXT_BLOCK_SIZE);
+    if (!bytes) {
+        return PTP_ERROR_IO;
     }
-    int getfunc_ret = handler->getfunc(NULL, handler->priv,towrite,bytes,&towrite);
-    if (getfunc_ret != PTP_RC_OK)
-      return getfunc_ret;
-    while (usbwritten < towrite) {
-	    ret = USB_BULK_WRITE(ptp_usb->handle,
-				    ptp_usb->outep,
-				    bytes+usbwritten,
-				    towrite-usbwritten,
-                                    &xwritten,
-				    ptp_usb->timeout);
-
-	    LIBMTP_USB_DEBUG("USB OUT==>\n");
-
-	    if (ret != LIBUSB_SUCCESS) {
-	      return PTP_ERROR_IO;
-	    }
-	    LIBMTP_USB_DATA(bytes+usbwritten, xwritten, 16);
-	    // check for result == 0 perhaps too.
-	    // Increase counters
-	    ptp_usb->current_transfer_complete += xwritten;
-	    curwrite += xwritten;
-	    usbwritten += xwritten;
+    while (curwrite < size) {
+        unsigned long usbwritten = 0;
+        int xwritten;
+        
+        towrite = size-curwrite;
+        if (towrite > CONTEXT_BLOCK_SIZE) {
+            towrite = CONTEXT_BLOCK_SIZE;
+        } else {
+            // This magic makes packets the same size that WMP send them.
+            if (towrite > ptp_usb->outep_maxpacket && towrite % ptp_usb->outep_maxpacket != 0) {
+                towrite -= towrite % ptp_usb->outep_maxpacket;
+            }
+        }
+        int getfunc_ret = handler->getfunc(NULL, handler->priv,towrite,bytes,&towrite);
+        if (getfunc_ret != PTP_RC_OK) {
+            free(bytes);
+            return getfunc_ret;
+        }
+        while (usbwritten < towrite) {
+            ret = USB_BULK_WRITE(ptp_usb->handle,
+                                 ptp_usb->outep,
+                                 bytes+usbwritten,
+                                 towrite-usbwritten,
+                                 &xwritten,
+                                 ptp_usb->timeout);
+            
+            LIBMTP_USB_DEBUG("USB OUT==>\n");
+            
+            if (ret != LIBUSB_SUCCESS) {
+                free(bytes);
+                return PTP_ERROR_IO;
+            }
+            LIBMTP_USB_DATA(bytes+usbwritten, xwritten, 16);
+            // check for result == 0 perhaps too.
+            // Increase counters
+            ptp_usb->current_transfer_complete += xwritten;
+            curwrite += xwritten;
+            usbwritten += xwritten;
+        }
+        // call callback
+        if (ptp_usb->callback_active) {
+            if (ptp_usb->current_transfer_complete >= ptp_usb->current_transfer_total) {
+                // send last update and disable callback.
+                ptp_usb->current_transfer_complete = ptp_usb->current_transfer_total;
+                ptp_usb->callback_active = 0;
+            }
+            if (ptp_usb->current_transfer_callback != NULL) {
+                int ret;
+                ret = ptp_usb->current_transfer_callback(ptp_usb->current_transfer_complete,
+                                                         ptp_usb->current_transfer_total,
+                                                         ptp_usb->current_transfer_callback_data);
+                if (ret != 0) {
+                    free(bytes);
+                    return PTP_ERROR_CANCEL;
+                }
+            }
+        }
+        if (xwritten < towrite) /* short writes happen */
+            break;
     }
-    // call callback
-    if (ptp_usb->callback_active) {
-      if (ptp_usb->current_transfer_complete >= ptp_usb->current_transfer_total) {
-	// send last update and disable callback.
-	ptp_usb->current_transfer_complete = ptp_usb->current_transfer_total;
-	ptp_usb->callback_active = 0;
-      }
-      if (ptp_usb->current_transfer_callback != NULL) {
-	int ret;
-	ret = ptp_usb->current_transfer_callback(ptp_usb->current_transfer_complete,
-						 ptp_usb->current_transfer_total,
-						 ptp_usb->current_transfer_callback_data);
-	if (ret != 0) {
-	  return PTP_ERROR_CANCEL;
-	}
-      }
+    free (bytes);
+    if (written) {
+        *written = curwrite;
     }
-    if (xwritten < towrite) /* short writes happen */
-      break;
-  }
-  free (bytes);
-  if (written) {
-    *written = curwrite;
-  }
-
-  // If this is the last transfer send a zero write if required
-  if (ptp_usb->current_transfer_complete >= ptp_usb->current_transfer_total) {
-    if ((towrite % ptp_usb->outep_maxpacket) == 0) {
-      int xwritten;
-
-      LIBMTP_USB_DEBUG("USB OUT==>\n");
-      LIBMTP_USB_DEBUG("Zero Write\n");
-
-      ret =USB_BULK_WRITE(ptp_usb->handle,
-			    ptp_usb->outep,
-			    (unsigned char *) "x",
-			    0,
-                            &xwritten,
-			    ptp_usb->timeout);
+    
+    // If this is the last transfer send a zero write if required
+    if (ptp_usb->current_transfer_complete >= ptp_usb->current_transfer_total) {
+        if ((towrite % ptp_usb->outep_maxpacket) == 0) {
+            int xwritten;
+            
+            LIBMTP_USB_DEBUG("USB OUT==>\n");
+            LIBMTP_USB_DEBUG("Zero Write\n");
+            
+            ret =USB_BULK_WRITE(ptp_usb->handle,
+                                ptp_usb->outep,
+                                (unsigned char *) "x",
+                                0,
+                                &xwritten,
+                                ptp_usb->timeout);
+        }
     }
-  }
-
-  if (ret != LIBUSB_SUCCESS)
-    return PTP_ERROR_IO;
-  return PTP_RC_OK;
+    
+    if (ret != LIBUSB_SUCCESS)
+        return PTP_ERROR_IO;
+    return PTP_RC_OK;
 }
 
 /* memory data get/put handler */
@@ -1047,12 +1581,12 @@ typedef struct {
 
 static uint16_t
 memory_getfunc(PTPParams* params, void* private,
-	       unsigned long wantlen, unsigned char *data,
-	       unsigned long *gotlen
-) {
+               unsigned long wantlen, unsigned char *data,
+               unsigned long *gotlen
+               ) {
 	PTPMemHandlerPrivate* priv = (PTPMemHandlerPrivate*)private;
 	unsigned long tocopy = wantlen;
-
+    
 	if (priv->curoff + tocopy > priv->size)
 		tocopy = priv->size - priv->curoff;
 	memcpy (data, priv->data + priv->curoff, tocopy);
@@ -1063,11 +1597,11 @@ memory_getfunc(PTPParams* params, void* private,
 
 static uint16_t
 memory_putfunc(PTPParams* params, void* private,
-	       unsigned long sendlen, unsigned char *data,
-	       unsigned long *putlen
-) {
+               unsigned long sendlen, unsigned char *data,
+               unsigned long *putlen
+               ) {
 	PTPMemHandlerPrivate* priv = (PTPMemHandlerPrivate*)private;
-
+    
 	if (priv->curoff + sendlen > priv->size) {
 		priv->data = realloc (priv->data, priv->curoff+sendlen);
 		priv->size = priv->curoff + sendlen;
@@ -1097,8 +1631,8 @@ ptp_init_recv_memory_handler(PTPDataHandler *handler) {
  */
 static uint16_t
 ptp_init_send_memory_handler(PTPDataHandler *handler,
-	unsigned char *data, unsigned long len
-) {
+                             unsigned char *data, unsigned long len
+                             ) {
 	PTPMemHandlerPrivate* priv;
 	priv = malloc (sizeof(PTPMemHandlerPrivate));
 	if (!priv)
@@ -1124,8 +1658,8 @@ ptp_exit_send_memory_handler (PTPDataHandler *handler) {
 /* hand over our internal data to caller */
 static uint16_t
 ptp_exit_recv_memory_handler (PTPDataHandler *handler,
-	unsigned char **data, unsigned long *size
-) {
+                              unsigned char **data, unsigned long *size
+                              ) {
 	PTPMemHandlerPrivate* priv = (PTPMemHandlerPrivate*)handler->priv;
 	*data = priv->data;
 	*size = priv->size;
@@ -1143,15 +1677,15 @@ ptp_usb_sendreq (PTPParams* params, PTPContainer* req)
 	PTPDataHandler	memhandler;
 	unsigned long written = 0;
 	unsigned long towrite;
-
+    
 	char txt[256];
-
+    
 	(void) ptp_render_opcode (params, req->Code, sizeof(txt), txt);
 	LIBMTP_USB_DEBUG("REQUEST: 0x%04x, %s\n", req->Code, txt);
-
+    
 	/* build appropriate USB container */
 	usbreq.length=htod32(PTP_USB_BULK_REQ_LEN-
-		(sizeof(uint32_t)*(5-req->Nparam)));
+                         (sizeof(uint32_t)*(5-req->Nparam)));
 	usbreq.type=htod16(PTP_USB_CONTAINER_COMMAND);
 	usbreq.code=htod16(req->Code);
 	usbreq.trans_id=htod32(req->Transaction_ID);
@@ -1164,20 +1698,20 @@ ptp_usb_sendreq (PTPParams* params, PTPContainer* req)
 	towrite = PTP_USB_BULK_REQ_LEN-(sizeof(uint32_t)*(5-req->Nparam));
 	ptp_init_send_memory_handler (&memhandler, (unsigned char*)&usbreq, towrite);
 	ret=ptp_write_func(
-		towrite,
-		&memhandler,
-		params->data,
-		&written
-	);
+                       towrite,
+                       &memhandler,
+                       params->data,
+                       &written
+                       );
 	ptp_exit_send_memory_handler (&memhandler);
 	if (ret != PTP_RC_OK && ret != PTP_ERROR_CANCEL) {
 		ret = PTP_ERROR_IO;
 	}
 	if (written != towrite && ret != PTP_ERROR_CANCEL && ret != PTP_ERROR_IO) {
 		libusb_glue_error (params,
-			"PTP: request code 0x%04x sending req wrote only %ld bytes instead of %d",
-			req->Code, written, towrite
-		);
+                           "PTP: request code 0x%04x sending req wrote only %ld bytes instead of %d",
+                           req->Code, written, towrite
+                           );
 		ret = PTP_ERROR_IO;
 	}
 	return ret;
@@ -1185,27 +1719,27 @@ ptp_usb_sendreq (PTPParams* params, PTPContainer* req)
 
 uint16_t
 ptp_usb_senddata (PTPParams* params, PTPContainer* ptp,
-		  unsigned long size, PTPDataHandler *handler
-) {
+                  uint64_t size, PTPDataHandler *handler
+                  ) {
 	uint16_t ret;
 	int wlen, datawlen;
 	unsigned long written;
 	PTPUSBBulkContainer usbdata;
-	uint32_t bytes_left_to_transfer;
+	uint64_t bytes_left_to_transfer;
 	PTPDataHandler memhandler;
-
-
+    
+    
 	LIBMTP_USB_DEBUG("SEND DATA PHASE\n");
-
+    
 	/* build appropriate USB container */
 	usbdata.length	= htod32(PTP_USB_BULK_HDR_LEN+size);
 	usbdata.type	= htod16(PTP_USB_CONTAINER_DATA);
 	usbdata.code	= htod16(ptp->Code);
 	usbdata.trans_id= htod32(ptp->Transaction_ID);
-
+    
 	((PTP_USB*)params->data)->current_transfer_complete = 0;
 	((PTP_USB*)params->data)->current_transfer_total = size+PTP_USB_BULK_HDR_LEN;
-
+    
 	if (params->split_header_data) {
 		datawlen = 0;
 		wlen = PTP_USB_BULK_HDR_LEN;
@@ -1214,7 +1748,7 @@ ptp_usb_senddata (PTPParams* params, PTPContainer* ptp,
 		/* For all camera devices. */
 		datawlen = (size<PTP_USB_BULK_PAYLOAD_LEN_WRITE)?size:PTP_USB_BULK_PAYLOAD_LEN_WRITE;
 		wlen = PTP_USB_BULK_HDR_LEN + datawlen;
-
+        
 		ret = handler->getfunc(params, handler->priv, datawlen, usbdata.payload.data, &gotlen);
 		if (ret != PTP_RC_OK)
 			return ret;
@@ -1233,7 +1767,7 @@ ptp_usb_senddata (PTPParams* params, PTPContainer* ptp,
 	bytes_left_to_transfer = size-datawlen;
 	ret = PTP_RC_OK;
 	while(bytes_left_to_transfer > 0) {
-		ret = ptp_write_func (bytes_left_to_transfer, handler, params->data, &written);
+		ret = ptp_write_async_func (bytes_left_to_transfer, handler, params->data, &written);
 		if (ret != PTP_RC_OK)
 			break;
 		if (written == 0) {
@@ -1248,12 +1782,16 @@ ptp_usb_senddata (PTPParams* params, PTPContainer* ptp,
 }
 
 static uint16_t ptp_usb_getpacket(PTPParams *params,
-		PTPUSBBulkContainer *packet, unsigned long *rlen)
+                                  PTPUSBBulkContainer *packet, unsigned long *rlen)
 {
 	PTPDataHandler	memhandler;
 	uint16_t	ret;
 	unsigned char	*x = NULL;
-
+	unsigned long packet_size;
+	PTP_USB *ptp_usb = (PTP_USB *) params->data;
+    
+	packet_size = ptp_usb->inep_maxpacket;
+    
 	/* read the header and potentially the first data */
 	if (params->response_packet_size > 0) {
 		/* If there is a buffered packet, just use it. */
@@ -1266,7 +1804,7 @@ static uint16_t ptp_usb_getpacket(PTPParams *params,
 		return PTP_RC_OK;
 	}
 	ptp_init_recv_memory_handler (&memhandler);
-	ret = ptp_read_func(PTP_USB_BULK_HS_MAX_PACKET_LEN_READ, &memhandler, params->data, rlen, 0);
+	ret = ptp_read_func(packet_size, &memhandler, params->data, rlen, 0);
 	ptp_exit_recv_memory_handler (&memhandler, &x, rlen);
 	if (x) {
 		memcpy (packet, x, *rlen);
@@ -1283,13 +1821,13 @@ ptp_usb_getdata (PTPParams* params, PTPContainer* ptp, PTPDataHandler *handler)
 	unsigned long	written;
 	PTP_USB *ptp_usb = (PTP_USB *) params->data;
 	int putfunc_ret;
-
+    
 	LIBMTP_USB_DEBUG("GET DATA PHASE\n");
-
+    
 	memset(&usbdata,0,sizeof(usbdata));
 	do {
 		unsigned long len, rlen;
-
+        
 		ret = ptp_usb_getpacket(params, &usbdata, &rlen);
 		if (ret != PTP_RC_OK) {
 			ret = PTP_ERROR_IO;
@@ -1302,7 +1840,7 @@ ptp_usb_getdata (PTPParams* params, PTPContainer* ptp, PTPDataHandler *handler)
 		if (dtoh16(usbdata.code)!=ptp->Code) {
 			if (FLAG_IGNORE_HEADER_ERRORS(ptp_usb)) {
 				libusb_glue_debug (params, "ptp2/ptp_usb_getdata: detected a broken "
-					   "PTP header, code field insane, expect problems! (But continuing)");
+                                   "PTP header, code field insane, expect problems! (But continuing)");
 				// Repair the header, so it won't wreak more havoc, don't just ignore it.
 				// Typically these two fields will be broken.
 				usbdata.code	 = htod16(ptp->Code);
@@ -1316,40 +1854,40 @@ ptp_usb_getdata (PTPParams* params, PTPContainer* ptp, PTPDataHandler *handler)
 				// field entirely.
 				if (ret < PTP_RC_Undefined || ret > PTP_RC_SpecificationOfDestinationUnsupported) {
 					libusb_glue_debug (params, "ptp2/ptp_usb_getdata: detected a broken "
-						   "PTP header, code field insane.");
+                                       "PTP header, code field insane.");
 					ret = PTP_ERROR_IO;
 				}
 				break;
 			}
 		}
-		if (usbdata.length == 0xffffffffU) {
-		  /* Copy first part of data to 'data' */
-		  putfunc_ret =
+		if (rlen == PTP_USB_BULK_HS_MAX_PACKET_LEN_READ) {
+            /* Copy first part of data to 'data' */
+            putfunc_ret =
 		    handler->putfunc(
-				     params, handler->priv, rlen - PTP_USB_BULK_HDR_LEN, usbdata.payload.data,
-				     &written
-				     );
-		  if (putfunc_ret != PTP_RC_OK)
-		    return putfunc_ret;
-
-		  /* stuff data directly to passed data handler */
-		  while (1) {
-		    unsigned long readdata;
-		    uint16_t xret;
-
-		    xret = ptp_read_func(
-					 PTP_USB_BULK_HS_MAX_PACKET_LEN_READ,
-					 handler,
-					 params->data,
-					 &readdata,
-					 0
-					 );
-		    if (xret != PTP_RC_OK)
-		      return xret;
-		    if (readdata < PTP_USB_BULK_HS_MAX_PACKET_LEN_READ)
-		      break;
-		  }
-		  return PTP_RC_OK;
+                             params, handler->priv, rlen - PTP_USB_BULK_HDR_LEN, usbdata.payload.data,
+                             &written
+                             );
+            if (putfunc_ret != PTP_RC_OK)
+                return putfunc_ret;
+            
+            /* stuff data directly to passed data handler */
+            while (1) {
+                unsigned long readdata;
+                uint16_t xret;
+                
+                xret = ptp_read_async_func(
+                                           0x20000000,
+                                           handler,
+                                           params->data,
+                                           &readdata,
+                                           0
+                                           );
+                if (xret != PTP_RC_OK)
+                    return xret;
+                if (readdata < 0x20000000)
+                    break;
+            }
+            return PTP_RC_OK;
 		}
 		if (rlen > dtoh32(usbdata.length)) {
 			/*
@@ -1366,88 +1904,88 @@ ptp_usb_getdata (PTPParams* params, PTPContainer* ptp, PTPDataHandler *handler)
 			 */
 			unsigned int packlen = dtoh32(usbdata.length);
 			unsigned int surplen = rlen - packlen;
-
+            
 			if (surplen >= PTP_USB_BULK_HDR_LEN) {
 				params->response_packet = malloc(surplen);
 				memcpy(params->response_packet,
 				       (uint8_t *) &usbdata + packlen, surplen);
 				params->response_packet_size = surplen;
-			/* Ignore reading one extra byte if device flags have been set */
+                /* Ignore reading one extra byte if device flags have been set */
 			} else if(!FLAG_NO_ZERO_READS(ptp_usb) &&
-				  (rlen - dtoh32(usbdata.length) == 1)) {
-			  libusb_glue_debug (params, "ptp2/ptp_usb_getdata: read %d bytes "
-				     "too much, expect problems!",
-				     rlen - dtoh32(usbdata.length));
+                      (rlen - dtoh32(usbdata.length) == 1)) {
+                libusb_glue_debug (params, "ptp2/ptp_usb_getdata: read %d bytes "
+                                   "too much, expect problems!",
+                                   rlen - dtoh32(usbdata.length));
 			}
 			rlen = packlen;
 		}
-
+        
 		/* For most PTP devices rlen is 512 == sizeof(usbdata)
 		 * here. For MTP devices splitting header and data it might
 		 * be 12.
 		 */
 		/* Evaluate full data length. */
 		len=dtoh32(usbdata.length)-PTP_USB_BULK_HDR_LEN;
-
+        
 		/* autodetect split header/data MTP devices */
 		if (dtoh32(usbdata.length) > 12 && (rlen==12))
 			params->split_header_data = 1;
-
+        
 		/* Copy first part of data to 'data' */
 		putfunc_ret =
-		  handler->putfunc(
-				   params, handler->priv, rlen - PTP_USB_BULK_HDR_LEN,
-				   usbdata.payload.data,
-				   &written
-				   );
+        handler->putfunc(
+                         params, handler->priv, rlen - PTP_USB_BULK_HDR_LEN,
+                         usbdata.payload.data,
+                         &written
+                         );
 		if (putfunc_ret != PTP_RC_OK)
-		  return putfunc_ret;
-
+            return putfunc_ret;
+        
 		if (FLAG_NO_ZERO_READS(ptp_usb) &&
 		    len+PTP_USB_BULK_HDR_LEN == PTP_USB_BULK_HS_MAX_PACKET_LEN_READ) {
-
-		  LIBMTP_USB_DEBUG("Reading in extra terminating byte\n");
-
-		  // need to read in extra byte and discard it
-		  int result = 0, xread;
-		  unsigned char byte = 0;
-                  result = USB_BULK_READ(ptp_usb->handle,
-					 ptp_usb->inep,
-					 &byte,
-					 1,
-                                         &xread,
-					 ptp_usb->timeout);
-
-		  if (result != 1)
-		    LIBMTP_INFO("Could not read in extra byte for PTP_USB_BULK_HS_MAX_PACKET_LEN_READ long file, return value 0x%04x\n", result);
+            
+            LIBMTP_USB_DEBUG("Reading in extra terminating byte\n");
+            
+            // need to read in extra byte and discard it
+            int result = 0, xread;
+            unsigned char byte = 0;
+            result = USB_BULK_READ(ptp_usb->handle,
+                                   ptp_usb->inep,
+                                   &byte,
+                                   1,
+                                   &xread,
+                                   ptp_usb->timeout);
+            
+            if (result != 1)
+                LIBMTP_INFO("Could not read in extra byte for PTP_USB_BULK_HS_MAX_PACKET_LEN_READ long file, return value 0x%04x\n", result);
 		} else if (len+PTP_USB_BULK_HDR_LEN == PTP_USB_BULK_HS_MAX_PACKET_LEN_READ && params->split_header_data == 0) {
-		  int zeroresult = 0, xread;
-		  unsigned char zerobyte = 0;
-
-		  LIBMTP_INFO("Reading in zero packet after header\n");
-
-		  zeroresult = USB_BULK_READ(ptp_usb->handle,
-					     ptp_usb->inep,
-					     &zerobyte,
-					     0,
-					     &xread,
-					     ptp_usb->timeout);
-
-		  if (zeroresult != 0)
-		    LIBMTP_INFO("LIBMTP panic: unable to read in zero packet, response 0x%04x", zeroresult);
+            int zeroresult = 0, xread;
+            unsigned char zerobyte = 0;
+            
+            LIBMTP_INFO("Reading in zero packet after header\n");
+            
+            zeroresult = USB_BULK_READ(ptp_usb->handle,
+                                       ptp_usb->inep,
+                                       &zerobyte,
+                                       0,
+                                       &xread,
+                                       ptp_usb->timeout);
+            
+            if (zeroresult != 0)
+                LIBMTP_INFO("LIBMTP panic: unable to read in zero packet, response 0x%04x", zeroresult);
 		}
-
+        
 		/* Is that all of data? */
 		if (len+PTP_USB_BULK_HDR_LEN<=rlen) {
-		  break;
+            break;
 		}
-
-		ret = ptp_read_func(len - (rlen - PTP_USB_BULK_HDR_LEN),
-				    handler,
-				    params->data, &rlen, 1);
-
+        
+		ret = ptp_read_async_func(len - (rlen - PTP_USB_BULK_HDR_LEN),
+                                  handler,
+                                  params->data, &rlen, 1);
+        
 		if (ret != PTP_RC_OK) {
-		  break;
+            break;
 		}
 	} while (0);
 	return ret;
@@ -1460,41 +1998,41 @@ ptp_usb_getresp (PTPParams* params, PTPContainer* resp)
 	unsigned long rlen;
 	PTPUSBBulkContainer usbresp;
 	PTP_USB *ptp_usb = (PTP_USB *)(params->data);
-
-
+    
+    
 	LIBMTP_USB_DEBUG("RESPONSE: ");
-
+    
 	memset(&usbresp,0,sizeof(usbresp));
 	/* read response, it should never be longer than sizeof(usbresp) */
 	ret = ptp_usb_getpacket(params, &usbresp, &rlen);
-
+    
 	// Fix for bevahiour reported by Scott Snyder on Samsung YP-U3. The player
 	// sends a packet containing just zeroes of length 2 (up to 4 has been seen too)
 	// after a NULL packet when it should send the response. This code ignores
 	// such illegal packets.
 	while (ret==PTP_RC_OK && rlen<PTP_USB_BULK_HDR_LEN && usbresp.length==0) {
-	  libusb_glue_debug (params, "ptp_usb_getresp: detected short response "
-		     "of %d bytes, expect problems! (re-reading "
-		     "response), rlen");
-	  ret = ptp_usb_getpacket(params, &usbresp, &rlen);
+        libusb_glue_debug (params, "ptp_usb_getresp: detected short response "
+                           "of %d bytes, expect problems! (re-reading "
+                           "response), rlen");
+        ret = ptp_usb_getpacket(params, &usbresp, &rlen);
 	}
-
+    
 	if (ret != PTP_RC_OK) {
 		ret = PTP_ERROR_IO;
 	} else
-	if (dtoh16(usbresp.type)!=PTP_USB_CONTAINER_RESPONSE) {
-		ret = PTP_ERROR_RESP_EXPECTED;
-	} else
-	if (dtoh16(usbresp.code)!=resp->Code) {
-		ret = dtoh16(usbresp.code);
-	}
-
+        if (dtoh16(usbresp.type)!=PTP_USB_CONTAINER_RESPONSE) {
+            ret = PTP_ERROR_RESP_EXPECTED;
+        } else
+            if (dtoh16(usbresp.code)!=resp->Code) {
+                ret = dtoh16(usbresp.code);
+            }
+    
 	LIBMTP_USB_DEBUG("%04x\n", ret);
-
+    
 	if (ret != PTP_RC_OK) {
-/*		libusb_glue_error (params,
-		"PTP: request code 0x%04x getting resp error 0x%04x",
-			resp->Code, ret);*/
+        /*		libusb_glue_error (params,
+         "PTP: request code 0x%04x getting resp error 0x%04x",
+         resp->Code, ret);*/
 		return ret;
 	}
 	/* build an appropriate PTPContainer */
@@ -1504,8 +2042,8 @@ ptp_usb_getresp (PTPParams* params, PTPContainer* resp)
 	if (FLAG_IGNORE_HEADER_ERRORS(ptp_usb)) {
 		if (resp->Transaction_ID != params->transaction_id-1) {
 			libusb_glue_debug (params, "ptp_usb_getresp: detected a broken "
-				   "PTP header, transaction ID insane, expect "
-				   "problems! (But continuing)");
+                               "PTP header, transaction ID insane, expect "
+                               "problems! (But continuing)");
 			// Repair the header, so it won't wreak more havoc.
 			resp->Transaction_ID = params->transaction_id-1;
 		}
@@ -1532,58 +2070,58 @@ ptp_usb_event (PTPParams* params, PTPContainer* event, int wait)
 	unsigned long rlen;
 	PTPUSBEventContainer usbevent;
 	PTP_USB *ptp_usb = (PTP_USB *)(params->data);
-
+    
 	memset(&usbevent,0,sizeof(usbevent));
-
+    
 	if ((params==NULL) || (event==NULL))
 		return PTP_ERROR_BADPARAM;
 	ret = PTP_RC_OK;
 	switch(wait) {
-	case PTP_EVENT_CHECK:
+        case PTP_EVENT_CHECK:
+            result = USB_BULK_READ(ptp_usb->handle,
+                                   ptp_usb->intep,
+                                   (unsigned char *) &usbevent,
+                                   sizeof(usbevent),
+                                   &xread,
+                                   0);
+            if (xread == 0)
                 result = USB_BULK_READ(ptp_usb->handle,
-				     ptp_usb->intep,
-				     (unsigned char *) &usbevent,
-				     sizeof(usbevent),
-				     &xread,
-				     0);
-		if (xread == 0)
-		  result = USB_BULK_READ(ptp_usb->handle,
-					 ptp_usb->intep,
-					 (unsigned char *) &usbevent,
-					 sizeof(usbevent),
-				         &xread,
-					 0);
-		if (result < 0) ret = PTP_ERROR_IO;
-		break;
-	case PTP_EVENT_CHECK_FAST:
+                                       ptp_usb->intep,
+                                       (unsigned char *) &usbevent,
+                                       sizeof(usbevent),
+                                       &xread,
+                                       0);
+            if (result < 0) ret = PTP_ERROR_IO;
+            break;
+        case PTP_EVENT_CHECK_FAST:
+            result = USB_BULK_READ(ptp_usb->handle,
+                                   ptp_usb->intep,
+                                   (unsigned char *) &usbevent,
+                                   sizeof(usbevent),
+                                   &xread,
+                                   ptp_usb->timeout);
+            if (xread == 0)
                 result = USB_BULK_READ(ptp_usb->handle,
-				     ptp_usb->intep,
-				     (unsigned char *) &usbevent,
-				     sizeof(usbevent),
-				     &xread,
-				     ptp_usb->timeout);
-		if (xread == 0)
-		  result = USB_BULK_READ(ptp_usb->handle,
-					 ptp_usb->intep,
-					 (unsigned char *) &usbevent,
-					 sizeof(usbevent),
-				         &xread,
-					 ptp_usb->timeout);
-		if (result < 0) ret = PTP_ERROR_IO;
-		break;
-	default:
-		ret = PTP_ERROR_BADPARAM;
-		break;
+                                       ptp_usb->intep,
+                                       (unsigned char *) &usbevent,
+                                       sizeof(usbevent),
+                                       &xread,
+                                       ptp_usb->timeout);
+            if (result < 0) ret = PTP_ERROR_IO;
+            break;
+        default:
+            ret = PTP_ERROR_BADPARAM;
+            break;
 	}
 	if (ret != PTP_RC_OK) {
 		libusb_glue_error (params,
-			"PTP: reading event an error 0x%04x occurred", ret);
+                           "PTP: reading event an error 0x%04x occurred", ret);
 		return PTP_ERROR_IO;
 	}
 	rlen = xread;
 	if (rlen < 8) {
 		libusb_glue_error (params,
-			"PTP: reading event an short read of %ld bytes occurred", rlen);
+                           "PTP: reading event an short read of %ld bytes occurred", rlen);
 		return PTP_ERROR_IO;
 	}
 	/* if we read anything over interrupt endpoint it must be an event */
@@ -1599,13 +2137,13 @@ ptp_usb_event (PTPParams* params, PTPContainer* event, int wait)
 
 uint16_t
 ptp_usb_event_check (PTPParams* params, PTPContainer* event) {
-
+    
 	return ptp_usb_event (params, event, PTP_EVENT_CHECK_FAST);
 }
 
 uint16_t
 ptp_usb_event_wait (PTPParams* params, PTPContainer* event) {
-
+    
 	return ptp_usb_event (params, event, PTP_EVENT_CHECK);
 }
 
@@ -1614,15 +2152,15 @@ ptp_usb_control_cancel_request (PTPParams *params, uint32_t transactionid) {
 	PTP_USB *ptp_usb = (PTP_USB *)(params->data);
 	int ret;
 	unsigned char buffer[6];
-
+    
 	htod16a(&buffer[0],PTP_EC_CancelTransaction);
 	htod32a(&buffer[2],transactionid);
 	ret = libusb_control_transfer(ptp_usb->handle,
-			      LIBUSB_REQUEST_TYPE_CLASS | LIBUSB_RECIPIENT_INTERFACE,
-                              0x64, 0x0000, 0x0000,
-			      buffer,
-			      sizeof(buffer),
-			      ptp_usb->timeout);
+                                  LIBUSB_REQUEST_TYPE_CLASS | LIBUSB_RECIPIENT_INTERFACE,
+                                  0x64, 0x0000, 0x0000,
+                                  buffer,
+                                  sizeof(buffer),
+                                  ptp_usb->timeout);
 	if (ret < sizeof(buffer))
 		return PTP_ERROR_IO;
 	return PTP_RC_OK;
@@ -1630,319 +2168,308 @@ ptp_usb_control_cancel_request (PTPParams *params, uint32_t transactionid) {
 
 static int init_ptp_usb(PTPParams* params, PTP_USB* ptp_usb, libusb_device* dev)
 {
-  libusb_device_handle *device_handle;
-  unsigned char buf[255];
-  int ret, usbresult;
-  struct libusb_config_descriptor *config;
-
-  params->sendreq_func=ptp_usb_sendreq;
-  params->senddata_func=ptp_usb_senddata;
-  params->getresp_func=ptp_usb_getresp;
-  params->getdata_func=ptp_usb_getdata;
-  params->cancelreq_func=ptp_usb_control_cancel_request;
-  params->data=ptp_usb;
-  params->transaction_id=0;
-  /*
-   * This is hardcoded here since we have no devices whatsoever that are BE.
-   * Change this the day we run into our first BE device (if ever).
-   */
-  params->byteorder = PTP_DL_LE;
-
-  ptp_usb->timeout = get_timeout(ptp_usb);
-
-  ret = libusb_open(dev, &device_handle);
-  if (ret != LIBUSB_SUCCESS) {
-    perror("libusb_open() failed!");
-    return -1;
-  }
-  ptp_usb->handle = device_handle;
-
-  /*
-   * If this device is known to be wrongfully claimed by other kernel
-   * drivers (such as mass storage), then try to unload it to make it
-   * accessible from user space.
-   */
-  if (FLAG_UNLOAD_DRIVER(ptp_usb) &&
-      libusb_kernel_driver_active(device_handle, ptp_usb->interface)
-  ) {
-      if (LIBUSB_SUCCESS != libusb_detach_kernel_driver(device_handle, ptp_usb->interface)) {
-	perror("libusb_detach_kernel_driver() failed, continuing anyway...");
-      }
-  }
-
-  /*
-   * Check if the config is set to something else than what we want
-   * to use. Only set the configuration if we absolutely have to.
-   * Also do not bail out if we fail.
-   */
-  ret = libusb_get_active_config_descriptor(dev, &config);
-  if (ret != LIBUSB_SUCCESS) {
-    perror("libusb_get_active_config_descriptor(1) failed");
-    return -1;
-  }
-  if (config->bConfigurationValue != ptp_usb->config) {
-    fprintf(stderr, "desired configuration different from current, trying to set configuration\n");
-    if (libusb_set_configuration(device_handle, ptp_usb->config)) {
-      perror("libusb_set_configuration() failed, continuing anyway...");
+    libusb_device_handle *device_handle;
+    unsigned char buf[255];
+    int ret, usbresult;
+    struct libusb_config_descriptor *config;
+    
+    params->sendreq_func=ptp_usb_sendreq;
+    params->senddata_func=ptp_usb_senddata;
+    params->getresp_func=ptp_usb_getresp;
+    params->getdata_func=ptp_usb_getdata;
+    params->cancelreq_func=ptp_usb_control_cancel_request;
+    params->data=ptp_usb;
+    params->transaction_id=0;
+    /*
+     * This is hardcoded here since we have no devices whatsoever that are BE.
+     * Change this the day we run into our first BE device (if ever).
+     */
+    params->byteorder = PTP_DL_LE;
+    
+    ptp_usb->timeout = get_timeout(ptp_usb);
+    
+    ret = libusb_open(dev, &device_handle);
+    if (ret != LIBUSB_SUCCESS) {
+        perror("libusb_open() failed!");
+        return -1;
     }
-    /* Re-fetch the config descriptor if we changed */
-    libusb_free_config_descriptor(config);
+    ptp_usb->handle = device_handle;
+    
+    /*
+     * If this device is known to be wrongfully claimed by other kernel
+     * drivers (such as mass storage), then try to unload it to make it
+     * accessible from user space.
+     */
+    if (FLAG_UNLOAD_DRIVER(ptp_usb) &&
+        libusb_kernel_driver_active(device_handle, ptp_usb->interface)
+        ) {
+        if (LIBUSB_SUCCESS != libusb_detach_kernel_driver(device_handle, ptp_usb->interface)) {
+            perror("libusb_detach_kernel_driver() failed, continuing anyway...");
+        }
+    }
+    
+    /*
+     * Check if the config is set to something else than what we want
+     * to use. Only set the configuration if we absolutely have to.
+     * Also do not bail out if we fail.
+     *
+     * Note that Darwin will not set the configuration for vendor-specific
+     * devices so we need to go in and set it.
+     */
     ret = libusb_get_active_config_descriptor(dev, &config);
     if (ret != LIBUSB_SUCCESS) {
-      perror("libusb_get_active_config_descriptor(2) failed");
-      return -1;
+        perror("libusb_get_active_config_descriptor(1) failed");
+        fprintf(stderr, "no active configuration, trying to set configuration\n");
+        if (libusb_set_configuration(device_handle, ptp_usb->config) != LIBUSB_SUCCESS) {
+            perror("libusb_set_configuration() failed, continuing anyway...");
+        }
+        ret = libusb_get_active_config_descriptor(dev, &config);
+        if (ret != LIBUSB_SUCCESS) {
+            perror("libusb_get_active_config_descriptor(2) failed");
+            return -1;
+        }
     }
-  }
-
-  /*
-   * It seems like on kernel 2.6.31 if we already have it open on another
-   * pthread in our app, we'll get an error if we try to claim it again,
-   * but that error is harmless because our process already claimed the interface
-   */
-  usbresult = libusb_claim_interface(device_handle, ptp_usb->interface);
-
-  if (usbresult != 0)
-    fprintf(stderr, "ignoring libusb_claim_interface() = %d", usbresult);
-
-  /*
-   * If the altsetting is set to something different than we want, switch
-   * it.
-   *
-   * FIXME: this seems to cause trouble on the Mac:s so disable it. Retry
-   * this on the Mac now that it only sets this when the altsetting differs.
-   */
+    if (config->bConfigurationValue != ptp_usb->config) {
+        fprintf(stderr, "desired configuration different from current, trying to set configuration\n");
+        if (libusb_set_configuration(device_handle, ptp_usb->config)) {
+            perror("libusb_set_configuration() failed, continuing anyway...");
+        }
+        /* Re-fetch the config descriptor if we changed */
+        libusb_free_config_descriptor(config);
+        ret = libusb_get_active_config_descriptor(dev, &config);
+        if (ret != LIBUSB_SUCCESS) {
+            perror("libusb_get_active_config_descriptor(2) failed");
+            return -1;
+        }
+    }
+    
+    /*
+     * It seems like on kernel 2.6.31 if we already have it open on another
+     * pthread in our app, we'll get an error if we try to claim it again,
+     * but that error is harmless because our process already claimed the interface
+     */
+    usbresult = libusb_claim_interface(device_handle, ptp_usb->interface);
+    
+    if (usbresult != 0)
+        fprintf(stderr, "ignoring libusb_claim_interface() = %d", usbresult);
+    
+    /*
+     * If the altsetting is set to something different than we want, switch
+     * it.
+     *
+     * FIXME: this seems to cause trouble on the Mac:s so disable it. Retry
+     * this on the Mac now that it only sets this when the altsetting differs.
+     */
 #ifndef __APPLE__
 #if 0 /* Disable this always, no idea on how to handle it */
-  if (config->interface[].altsetting[].bAlternateSetting !=
-      ptp_usb->altsetting) {
-    fprintf(stderr, "desired altsetting different from current, trying to set altsetting\n");
-    usbresult = libusb_set_interface_alt_setting(device_handle,
-						 ptp_usb->interface,
-						 ptp_usb->altsetting);
-    if (usbresult != 0)
-      fprintf(stderr, "ignoring libusb_set_interface_alt_setting() = %d\n", usbresult);
-  }
+    if (config->interface[].altsetting[].bAlternateSetting !=
+        ptp_usb->altsetting) {
+        fprintf(stderr, "desired altsetting different from current, trying to set altsetting\n");
+        usbresult = libusb_set_interface_alt_setting(device_handle,
+                                                     ptp_usb->interface,
+                                                     ptp_usb->altsetting);
+        if (usbresult != 0)
+            fprintf(stderr, "ignoring libusb_set_interface_alt_setting() = %d\n", usbresult);
+    }
 #endif
 #endif
-
-  libusb_free_config_descriptor(config);
-
-  if (FLAG_SWITCH_MODE_BLACKBERRY(ptp_usb)) {
-    int ret;
-
-    // FIXME : Only for BlackBerry Storm
-    // What does it mean? Maybe switch mode...
-    // This first control message is absolutely necessary
-    usleep(1000);
-    ret = libusb_control_transfer(device_handle,
-                          LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE | LIBUSB_ENDPOINT_IN,
-                          0xaa, 0x00, 0x04, buf, 0x40, 1000);
-    LIBMTP_USB_DEBUG("BlackBerry magic part 1:\n");
-    LIBMTP_USB_DATA(buf, ret, 16);
-
-    usleep(1000);
-    // This control message is unnecessary
-    ret = libusb_control_transfer(device_handle,
-                          LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE | LIBUSB_ENDPOINT_IN,
-                          0xa5, 0x00, 0x01, buf, 0x02, 1000);
-    LIBMTP_USB_DEBUG("BlackBerry magic part 2:\n");
-    LIBMTP_USB_DATA(buf, ret, 16);
-
-    usleep(1000);
-    // This control message is unnecessary
-    ret = libusb_control_transfer(device_handle,
-                          LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE | LIBUSB_ENDPOINT_IN,
-                          0xa8, 0x00, 0x01, buf, 0x05, 1000);
-    LIBMTP_USB_DEBUG("BlackBerry magic part 3:\n");
-    LIBMTP_USB_DATA(buf, ret, 16);
-
-    usleep(1000);
-    // This control message is unnecessary
-    ret = libusb_control_transfer(device_handle,
-                          LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE | LIBUSB_ENDPOINT_IN,
-                          0xa8, 0x00, 0x01, buf, 0x11, 1000);
-    LIBMTP_USB_DEBUG("BlackBerry magic part 4:\n");
-    LIBMTP_USB_DATA(buf, ret, 16);
-
-    usleep(1000);
-  }
-  return 0;
+    
+    libusb_free_config_descriptor(config);
+    
+    if (FLAG_SWITCH_MODE_BLACKBERRY(ptp_usb)) {
+        int ret;
+        
+        // FIXME : Only for BlackBerry Storm
+        // What does it mean? Maybe switch mode...
+        // This first control message is absolutely necessary
+        usleep(1000);
+        ret = libusb_control_transfer(device_handle,
+                                      LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE | LIBUSB_ENDPOINT_IN,
+                                      0xaa, 0x00, 0x04, buf, 0x40, 1000);
+        LIBMTP_USB_DEBUG("BlackBerry magic part 1:\n");
+        LIBMTP_USB_DATA(buf, ret, 16);
+        
+        usleep(1000);
+        // This control message is unnecessary
+        ret = libusb_control_transfer(device_handle,
+                                      LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE | LIBUSB_ENDPOINT_IN,
+                                      0xa5, 0x00, 0x01, buf, 0x02, 1000);
+        LIBMTP_USB_DEBUG("BlackBerry magic part 2:\n");
+        LIBMTP_USB_DATA(buf, ret, 16);
+        
+        usleep(1000);
+        // This control message is unnecessary
+        ret = libusb_control_transfer(device_handle,
+                                      LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE | LIBUSB_ENDPOINT_IN,
+                                      0xa8, 0x00, 0x01, buf, 0x05, 1000);
+        LIBMTP_USB_DEBUG("BlackBerry magic part 3:\n");
+        LIBMTP_USB_DATA(buf, ret, 16);
+        
+        usleep(1000);
+        // This control message is unnecessary
+        ret = libusb_control_transfer(device_handle,
+                                      LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE | LIBUSB_ENDPOINT_IN,
+                                      0xa8, 0x00, 0x01, buf, 0x11, 1000);
+        LIBMTP_USB_DEBUG("BlackBerry magic part 4:\n");
+        LIBMTP_USB_DATA(buf, ret, 16);
+        
+        usleep(1000);
+    }
+    return 0;
 }
 
 static void clear_stall(PTP_USB* ptp_usb)
 {
-  uint16_t status;
-  int ret;
-
-  /* check the inep status */
-  status = 0;
-  ret = usb_get_endpoint_status(ptp_usb,ptp_usb->inep,&status);
-  if (ret<0) {
-//    perror ("inep: usb_get_endpoint_status()");
-  } else if (status) {
-    LIBMTP_INFO("Clearing stall on IN endpoint\n");
-    ret = libusb_clear_halt (ptp_usb->handle, ptp_usb->inep);
-    if (ret != LIBUSB_SUCCESS) {
-      perror ("usb_clear_stall_feature()");
+    uint16_t status;
+    int ret;
+    
+    /* check the inep status */
+    status = 0;
+    ret = usb_get_endpoint_status(ptp_usb,ptp_usb->inep,&status);
+    if (ret<0) {
+        perror ("inep: usb_get_endpoint_status()");
+    } else if (status) {
+        LIBMTP_INFO("Clearing stall on IN endpoint\n");
+        ret = libusb_clear_halt (ptp_usb->handle, ptp_usb->inep);
+        if (ret != LIBUSB_SUCCESS) {
+            perror ("usb_clear_stall_feature()");
+        }
     }
-  }
-
-  /* check the outep status */
-  status=0;
-  ret = usb_get_endpoint_status(ptp_usb,ptp_usb->outep,&status);
-  if (ret<0) {
-//    perror("outep: usb_get_endpoint_status()");
-  } else if (status) {
-    LIBMTP_INFO("Clearing stall on OUT endpoint\n");
-    ret = libusb_clear_halt (ptp_usb->handle, ptp_usb->outep);
-    if (ret != LIBUSB_SUCCESS) {
-      perror("usb_clear_stall_feature()");
+    
+    /* check the outep status */
+    status=0;
+    ret = usb_get_endpoint_status(ptp_usb,ptp_usb->outep,&status);
+    if (ret<0) {
+        perror("outep: usb_get_endpoint_status()");
+    } else if (status) {
+        LIBMTP_INFO("Clearing stall on OUT endpoint\n");
+        ret = libusb_clear_halt(ptp_usb->handle, ptp_usb->outep);
+        if (ret != LIBUSB_SUCCESS) {
+            perror("usb_clear_stall_feature()");
+        }
     }
-  }
-
-  /* TODO: do we need this for INTERRUPT (ptp_usb->intep) too? */
-}
-
-static void clear_halt(PTP_USB* ptp_usb)
-{
-  int ret;
-
-  ret = libusb_clear_halt(ptp_usb->handle,ptp_usb->inep);
-  if (ret<0) {
-    perror("usb_clear_halt() on IN endpoint");
-  }
-  ret = libusb_clear_halt(ptp_usb->handle,ptp_usb->outep);
-  if (ret<0) {
-    perror("usb_clear_halt() on OUT endpoint");
-  }
-  ret = libusb_clear_halt(ptp_usb->handle,ptp_usb->intep);
-  if (ret<0) {
-    perror("usb_clear_halt() on INTERRUPT endpoint");
-  }
+    
+    /* TODO: do we need this for INTERRUPT (ptp_usb->intep) too? */
 }
 
 static void close_usb(PTP_USB* ptp_usb)
 {
-  if (!FLAG_NO_RELEASE_INTERFACE(ptp_usb)) {
-    /*
-     * Clear any stalled endpoints
-     * On misbehaving devices designed for Windows/Mac, quote from:
-     * http://www2.one-eyed-alien.net/~mdharm/linux-usb/target_offenses.txt
-     * Device does Bad Things(tm) when it gets a GET_STATUS after CLEAR_HALT
-     * (...) Windows, when clearing a stall, only sends the CLEAR_HALT command,
-     * and presumes that the stall has cleared.  Some devices actually choke
-     * if the CLEAR_HALT is followed by a GET_STATUS (used to determine if the
-     * STALL is persistant or not).
-     */
-    clear_stall(ptp_usb);
-    // Clear halts on any endpoints
-    clear_halt(ptp_usb);
-    // Added to clear some stuff on the OUT endpoint
-    // TODO: is this good on the Mac too?
-    // HINT: some devices may need that you comment these two out too.
-    libusb_clear_halt(ptp_usb->handle, ptp_usb->outep);
-    libusb_release_interface(ptp_usb->handle, (int) ptp_usb->interface);
-  }
-  if (FLAG_FORCE_RESET_ON_CLOSE(ptp_usb)) {
-    /*
-     * Some devices really love to get reset after being
-     * disconnected. Again, since Windows never disconnects
-     * a device closing behaviour is seldom or never exercised
-     * on devices when engineered and often error prone.
-     * Reset may help some.
-     */
-    libusb_reset_device (ptp_usb->handle);
-  }
-  libusb_close(ptp_usb->handle);
+    if (!FLAG_NO_RELEASE_INTERFACE(ptp_usb)) {
+        /*
+         * Clear any stalled endpoints
+         * On misbehaving devices designed for Windows/Mac, quote from:
+         * http://www2.one-eyed-alien.net/~mdharm/linux-usb/target_offenses.txt
+         * Device does Bad Things(tm) when it gets a GET_STATUS after CLEAR_HALT
+         * (...) Windows, when clearing a stall, only sends the CLEAR_HALT command,
+         * and presumes that the stall has cleared.  Some devices actually choke
+         * if the CLEAR_HALT is followed by a GET_STATUS (used to determine if the
+         * STALL is persistant or not).
+         */
+        clear_stall(ptp_usb);
+        libusb_release_interface(ptp_usb->handle, (int) ptp_usb->interface);
+    }
+    if (FLAG_FORCE_RESET_ON_CLOSE(ptp_usb)) {
+        /*
+         * Some devices really love to get reset after being
+         * disconnected. Again, since Windows never disconnects
+         * a device closing behaviour is seldom or never exercised
+         * on devices when engineered and often error prone.
+         * Reset may help some.
+         */
+        libusb_reset_device (ptp_usb->handle);
+    }
+    ptp_usb->event_thread_run = 0;
+    libusb_close(ptp_usb->handle);
+    ptp_event_thread_cleanup(ptp_usb);
 }
 
 /**
  * Self-explanatory?
  */
 static int find_interface_and_endpoints(libusb_device *dev,
-					uint8_t *conf,
-					uint8_t *interface,
-					uint8_t *altsetting,
-					int* inep,
-					int* inep_maxpacket,
-					int* outep,
-					int *outep_maxpacket,
-					int* intep)
+                                        uint8_t *conf,
+                                        uint8_t *interface,
+                                        uint8_t *altsetting,
+                                        int* inep,
+                                        int* inep_maxpacket,
+                                        int* outep,
+                                        int *outep_maxpacket,
+                                        int* intep)
 {
-  uint8_t i, ret;
-  struct libusb_device_descriptor desc;
-
-  ret = libusb_get_device_descriptor(dev, &desc);
-  if (ret != LIBUSB_SUCCESS)
+    uint8_t i, ret;
+    struct libusb_device_descriptor desc;
+    
+    ret = libusb_get_device_descriptor(dev, &desc);
+    if (ret != LIBUSB_SUCCESS)
+        return -1;
+    
+    // Loop over the device configurations
+    for (i = 0; i < desc.bNumConfigurations; i++) {
+        uint8_t j;
+        struct libusb_config_descriptor *config;
+        
+        ret = libusb_get_config_descriptor(dev, i, &config);
+        if (ret != 0)
+            continue;
+        
+        *conf = config->bConfigurationValue;
+        
+        if (ret != LIBUSB_SUCCESS) continue;
+        // Loop over each configurations interfaces
+        for (j = 0; j < config->bNumInterfaces; j++) {
+            uint8_t k, l;
+            uint8_t no_ep;
+            int found_inep = 0;
+            int found_outep = 0;
+            int found_intep = 0;
+            const struct libusb_endpoint_descriptor *ep;
+            
+            // Inspect the altsettings of this interface...
+            for (k = 0; k < config->interface[j].num_altsetting; k++) {
+                
+                // MTP devices shall have 3 endpoints, ignore those interfaces
+                // that haven't.
+                no_ep = config->interface[j].altsetting[k].bNumEndpoints;
+                if (no_ep != 3)
+                    continue;
+                
+                *interface = config->interface[j].altsetting[k].bInterfaceNumber;
+                *altsetting = config->interface[j].altsetting[k].bAlternateSetting;
+                ep = config->interface[j].altsetting[k].endpoint;
+                
+                // Loop over the three endpoints to locate two bulk and
+                // one interrupt endpoint and FAIL if we cannot, and continue.
+                for (l = 0; l < no_ep; l++) {
+                    if (ep[l].bmAttributes == LIBUSB_TRANSFER_TYPE_BULK) {
+                        if ((ep[l].bEndpointAddress & LIBUSB_ENDPOINT_DIR_MASK) ==
+                            LIBUSB_ENDPOINT_DIR_MASK) {
+                            *inep = ep[l].bEndpointAddress;
+                            *inep_maxpacket = ep[l].wMaxPacketSize;
+                            found_inep = 1;
+                        }
+                        if ((ep[l].bEndpointAddress & LIBUSB_ENDPOINT_DIR_MASK) == 0) {
+                            *outep = ep[l].bEndpointAddress;
+                            *outep_maxpacket = ep[l].wMaxPacketSize;
+                            found_outep = 1;
+                        }
+                    } else if (ep[l].bmAttributes == LIBUSB_TRANSFER_TYPE_INTERRUPT) {
+                        if ((ep[l].bEndpointAddress & LIBUSB_ENDPOINT_DIR_MASK) ==
+                            LIBUSB_ENDPOINT_DIR_MASK) {
+                            *intep = ep[l].bEndpointAddress;
+                            found_intep = 1;
+                        }
+                    }
+                }
+                if (found_inep && found_outep && found_intep) {
+                    libusb_free_config_descriptor(config);
+                    // We assigned the endpoints so return here.
+                    return 0;
+                }
+            } // Next altsetting
+        } // Next interface
+        libusb_free_config_descriptor(config);
+    } // Next config
     return -1;
-
-  // Loop over the device configurations
-  for (i = 0; i < desc.bNumConfigurations; i++) {
-    uint8_t j;
-    struct libusb_config_descriptor *config;
-
-    ret = libusb_get_config_descriptor(dev, i, &config);
-    if (ret != 0)
-      continue;
-
-    *conf = config->bConfigurationValue;
-
-    if (ret != LIBUSB_SUCCESS) continue;
-    // Loop over each configurations interfaces
-    for (j = 0; j < config->bNumInterfaces; j++) {
-      uint8_t k, l;
-      uint8_t no_ep;
-      int found_inep = 0;
-      int found_outep = 0;
-      int found_intep = 0;
-      const struct libusb_endpoint_descriptor *ep;
-
-      // Inspect the altsettings of this interface...
-      for (k = 0; k < config->interface[j].num_altsetting; k++) {
-
-	// MTP devices shall have 3 endpoints, ignore those interfaces
-	// that haven't.
-	no_ep = config->interface[j].altsetting[k].bNumEndpoints;
-	if (no_ep != 3)
-	  continue;
-
-	*interface = config->interface[j].altsetting[k].bInterfaceNumber;
-	*altsetting = config->interface[j].altsetting[k].bAlternateSetting;
-	ep = config->interface[j].altsetting[k].endpoint;
-
-	// Loop over the three endpoints to locate two bulk and
-	// one interrupt endpoint and FAIL if we cannot, and continue.
-	for (l = 0; l < no_ep; l++) {
-	  if (ep[l].bmAttributes == LIBUSB_TRANSFER_TYPE_BULK) {
-	    if ((ep[l].bEndpointAddress & LIBUSB_ENDPOINT_DIR_MASK) ==
-		LIBUSB_ENDPOINT_DIR_MASK) {
-	      *inep = ep[l].bEndpointAddress;
-	      *inep_maxpacket = ep[l].wMaxPacketSize;
-	      found_inep = 1;
-	    }
-	    if ((ep[l].bEndpointAddress & LIBUSB_ENDPOINT_DIR_MASK) == 0) {
-	      *outep = ep[l].bEndpointAddress;
-	      *outep_maxpacket = ep[l].wMaxPacketSize;
-	      found_outep = 1;
-	    }
-	  } else if (ep[l].bmAttributes == LIBUSB_TRANSFER_TYPE_INTERRUPT) {
-	    if ((ep[l].bEndpointAddress & LIBUSB_ENDPOINT_DIR_MASK) ==
-		LIBUSB_ENDPOINT_DIR_MASK) {
-	      *intep = ep[l].bEndpointAddress;
-	      found_intep = 1;
-	    }
-	  }
-	}
-	if (found_inep && found_outep && found_intep) {
-	  libusb_free_config_descriptor(config);
-	  // We assigned the endpoints so return here.
-	  return 0;
-	}
-      } // Next altsetting
-    } // Next interface
-    libusb_free_config_descriptor(config);
-  } // Next config
-  return -1;
 }
 
 /**
@@ -1953,187 +2480,196 @@ static int find_interface_and_endpoints(libusb_device *dev,
  * @return an error code.
  */
 LIBMTP_error_number_t configure_usb_device(LIBMTP_raw_device_t *device,
-					   PTPParams *params,
-					   void **usbinfo)
+                                           PTPParams *params,
+                                           void **usbinfo)
 {
-  PTP_USB *ptp_usb;
-  libusb_device *ldevice;
-  uint16_t ret = 0;
-  int err, found = 0, i;
-  ssize_t nrofdevs;
-  libusb_device **devs = NULL;
-  struct libusb_device_descriptor desc;
-
-  /* See if we can find this raw device again... */
-  init_usb();
-
-  nrofdevs = libusb_get_device_list(NULL, &devs);
-  for (i = 0; i < nrofdevs ; i++) {
-    if (libusb_get_bus_number(devs[i]) != device->bus_location)
-      continue;
-    if (libusb_get_device_address(devs[i]) != device->devnum)
-      continue;
-
-    ret = libusb_get_device_descriptor(devs[i], &desc);
-    if (ret != LIBUSB_SUCCESS) continue;
-
-    if(desc.idVendor  == device->device_entry.vendor_id &&
-       desc.idProduct == device->device_entry.product_id ) {
-	  ldevice = devs[i];
-	  found = 1;
-	  break;
+    PTP_USB *ptp_usb;
+    libusb_device *ldevice;
+    uint16_t ret = 0;
+    int err, found = 0, i;
+    ssize_t nrofdevs;
+    libusb_device **devs = NULL;
+    struct libusb_device_descriptor desc;
+    LIBMTP_error_number_t init_usb_ret;
+    
+    /* See if we can find this raw device again... */
+    init_usb_ret = init_usb();
+    if (init_usb_ret != LIBMTP_ERROR_NONE)
+        return init_usb_ret;
+    
+    nrofdevs = libusb_get_device_list(NULL, &devs);
+    for (i = 0; i < nrofdevs ; i++) {
+        if (libusb_get_bus_number(devs[i]) != device->bus_location)
+            continue;
+        if (libusb_get_device_address(devs[i]) != device->devnum)
+            continue;
+        
+        ret = libusb_get_device_descriptor(devs[i], &desc);
+        if (ret != LIBUSB_SUCCESS) continue;
+        
+        if(desc.idVendor  == device->device_entry.vendor_id &&
+           desc.idProduct == device->device_entry.product_id ) {
+            ldevice = devs[i];
+            found = 1;
+            break;
+        }
     }
-  }
-  /* Device has gone since detecting raw devices! */
-  if (!found) {
-    libusb_free_device_list (devs, 0);
-    return LIBMTP_ERROR_NO_DEVICE_ATTACHED;
-  }
-
-  /* Allocate structs */
-  ptp_usb = (PTP_USB *) malloc(sizeof(PTP_USB));
-  if (ptp_usb == NULL) {
-    libusb_free_device_list (devs, 0);
-    return LIBMTP_ERROR_MEMORY_ALLOCATION;
-  }
-  /* Start with a blank slate (includes setting device_flags to 0) */
-  memset(ptp_usb, 0, sizeof(PTP_USB));
-
-  /* Copy the raw device */
-  memcpy(&ptp_usb->rawdevice, device, sizeof(LIBMTP_raw_device_t));
-
-  /*
-   * Some devices must have their "OS Descriptor" massaged in order
-   * to work.
-   */
-  if (FLAG_ALWAYS_PROBE_DESCRIPTOR(ptp_usb)) {
-    // Massage the device descriptor
-    (void) probe_device_descriptor(ldevice, NULL);
-  }
-
-  /* Assign interface and endpoints to usbinfo... */
-  err = find_interface_and_endpoints(ldevice,
-				     &ptp_usb->config,
-				     &ptp_usb->interface,
-				     &ptp_usb->altsetting,
-				     &ptp_usb->inep,
-				     &ptp_usb->inep_maxpacket,
-				     &ptp_usb->outep,
-				     &ptp_usb->outep_maxpacket,
-				     &ptp_usb->intep);
-
-  if (err) {
-    libusb_free_device_list (devs, 0);
-    LIBMTP_ERROR("LIBMTP PANIC: Unable to find interface & endpoints of device\n");
-    return LIBMTP_ERROR_CONNECTING;
-  }
-
-  /* Copy USB version number */
-  ptp_usb->bcdusb = desc.bcdUSB;
-
-  /* Attempt to initialize this device */
-  if (init_ptp_usb(params, ptp_usb, ldevice) < 0) {
-    LIBMTP_ERROR("LIBMTP PANIC: Unable to initialize device\n");
-    return LIBMTP_ERROR_CONNECTING;
-  }
-
-  /*
-   * This works in situations where previous bad applications
-   * have not used LIBMTP_Release_Device on exit
-   */
-  if ((ret = ptp_opensession(params, 1)) == PTP_ERROR_IO) {
-    LIBMTP_ERROR("PTP_ERROR_IO: failed to open session, trying again after resetting USB interface\n");
-    LIBMTP_ERROR("LIBMTP libusb: Attempt to reset device\n");
-    libusb_reset_device (ptp_usb->handle);
-    close_usb(ptp_usb);
-
-    if(init_ptp_usb(params, ptp_usb, ldevice) <0) {
-      LIBMTP_ERROR("LIBMTP PANIC: Could not init USB on second attempt\n");
-      return LIBMTP_ERROR_CONNECTING;
+    /* Device has gone since detecting raw devices! */
+    if (!found) {
+        libusb_free_device_list (devs, 0);
+        return LIBMTP_ERROR_NO_DEVICE_ATTACHED;
     }
-
-    /* Device has been reset, try again */
+    
+    /* Allocate structs */
+    ptp_usb = (PTP_USB *) malloc(sizeof(PTP_USB));
+    if (ptp_usb == NULL) {
+        libusb_free_device_list (devs, 0);
+        return LIBMTP_ERROR_MEMORY_ALLOCATION;
+    }
+    /* Start with a blank slate (includes setting device_flags to 0) */
+    memset(ptp_usb, 0, sizeof(PTP_USB));
+    
+    /* Copy the raw device */
+    memcpy(&ptp_usb->rawdevice, device, sizeof(LIBMTP_raw_device_t));
+    
+    /*
+     * Some devices must have their "OS Descriptor" massaged in order
+     * to work.
+     */
+    if (FLAG_ALWAYS_PROBE_DESCRIPTOR(ptp_usb)) {
+        // Massage the device descriptor
+        (void) probe_device_descriptor(ldevice, NULL);
+    }
+    
+    /* Assign interface and endpoints to usbinfo... */
+    err = find_interface_and_endpoints(ldevice,
+                                       &ptp_usb->config,
+                                       &ptp_usb->interface,
+                                       &ptp_usb->altsetting,
+                                       &ptp_usb->inep,
+                                       &ptp_usb->inep_maxpacket,
+                                       &ptp_usb->outep,
+                                       &ptp_usb->outep_maxpacket,
+                                       &ptp_usb->intep);
+    
+    if (err) {
+        libusb_free_device_list (devs, 0);
+        LIBMTP_ERROR("LIBMTP PANIC: Unable to find interface & endpoints of device\n");
+        return LIBMTP_ERROR_CONNECTING;
+    }
+    
+    /* Copy USB version number */
+    ptp_usb->bcdusb = desc.bcdUSB;
+    
+    /* Attempt to initialize this device */
+    if (init_ptp_usb(params, ptp_usb, ldevice) < 0) {
+        LIBMTP_ERROR("LIBMTP PANIC: Unable to initialize device\n");
+        libusb_free_device_list (devs, 0);
+        return LIBMTP_ERROR_CONNECTING;
+    }
+    
+    /*
+     * This works in situations where previous bad applications
+     * have not used LIBMTP_Release_Device on exit
+     */
     if ((ret = ptp_opensession(params, 1)) == PTP_ERROR_IO) {
-      LIBMTP_ERROR("LIBMTP PANIC: failed to open session on second attempt\n");
-      return LIBMTP_ERROR_CONNECTING;
+        LIBMTP_ERROR("PTP_ERROR_IO: failed to open session, trying again after resetting USB interface\n");
+        LIBMTP_ERROR("LIBMTP libusb: Attempt to reset device\n");
+        libusb_reset_device (ptp_usb->handle);
+        close_usb(ptp_usb);
+        
+        if(init_ptp_usb(params, ptp_usb, ldevice) <0) {
+            LIBMTP_ERROR("LIBMTP PANIC: Could not init USB on second attempt\n");
+            libusb_free_device_list (devs, 0);
+            return LIBMTP_ERROR_CONNECTING;
+        }
+        
+        /* Device has been reset, try again */
+        if ((ret = ptp_opensession(params, 1)) == PTP_ERROR_IO) {
+            LIBMTP_ERROR("LIBMTP PANIC: failed to open session on second attempt\n");
+            libusb_free_device_list (devs, 0);
+            return LIBMTP_ERROR_CONNECTING;
+        }
     }
-  }
-
-  /* Was the transaction id invalid? Try again */
-  if (ret == PTP_RC_InvalidTransactionID) {
-    LIBMTP_ERROR("LIBMTP WARNING: Transaction ID was invalid, increment and try again\n");
-    params->transaction_id += 10;
-    ret = ptp_opensession(params, 1);
-  }
-
-  if (ret != PTP_RC_SessionAlreadyOpened && ret != PTP_RC_OK) {
-    LIBMTP_ERROR("LIBMTP PANIC: Could not open session! "
-	    "(Return code %d)\n  Try to reset the device.\n",
-	    ret);
-    libusb_release_interface(ptp_usb->handle, ptp_usb->interface);
-    return LIBMTP_ERROR_CONNECTING;
-  }
-
-  /* OK configured properly */
-  *usbinfo = (void *) ptp_usb;
-  return LIBMTP_ERROR_NONE;
+    
+    /* Was the transaction id invalid? Try again */
+    if (ret == PTP_RC_InvalidTransactionID) {
+        LIBMTP_ERROR("LIBMTP WARNING: Transaction ID was invalid, increment and try again\n");
+        params->transaction_id += 10;
+        ret = ptp_opensession(params, 1);
+    }
+    
+    if (ret != PTP_RC_SessionAlreadyOpened && ret != PTP_RC_OK) {
+        LIBMTP_ERROR("LIBMTP PANIC: Could not open session! "
+                     "(Return code %d)\n  Try to reset the device.\n",
+                     ret);
+        libusb_release_interface(ptp_usb->handle, ptp_usb->interface);
+        libusb_free_device_list (devs, 0);
+        return LIBMTP_ERROR_CONNECTING;
+    }
+    
+    /* OK configured properly */
+    *usbinfo = (void *) ptp_usb;
+    libusb_free_device_list (devs, 0);
+    ptp_event_thread_init(ptp_usb);
+    return LIBMTP_ERROR_NONE;
 }
 
 
 void close_device (PTP_USB *ptp_usb, PTPParams *params)
 {
-  if (ptp_closesession(params)!=PTP_RC_OK)
-    LIBMTP_ERROR("ERROR: Could not close session!\n");
-  close_usb(ptp_usb);
+    if (ptp_closesession(params)!=PTP_RC_OK)
+        LIBMTP_ERROR("ERROR: Could not close session!\n");
+    close_usb(ptp_usb);
 }
 
 void set_usb_device_timeout(PTP_USB *ptp_usb, int timeout)
 {
-  ptp_usb->timeout = timeout;
+    ptp_usb->timeout = timeout;
 }
 
 void get_usb_device_timeout(PTP_USB *ptp_usb, int *timeout)
 {
-  *timeout = ptp_usb->timeout;
+    *timeout = ptp_usb->timeout;
 }
 
 int guess_usb_speed(PTP_USB *ptp_usb)
 {
-  int bytes_per_second;
-
-  /*
-   * We don't know the actual speeds so these are rough guesses
-   * from the info you can find here:
-   * http://en.wikipedia.org/wiki/USB#Transfer_rates
-   * http://www.barefeats.com/usb2.html
-   */
-  switch (ptp_usb->bcdusb & 0xFF00) {
-  case 0x0100:
-    /* 1.x USB versions let's say 1MiB/s */
-    bytes_per_second = 1*1024*1024;
-    break;
-  case 0x0200:
-  case 0x0300:
-    /* USB 2.0 nominal speed 18MiB/s */
-    /* USB 3.0 won't be worse? */
-    bytes_per_second = 18*1024*1024;
-    break;
-  default:
-    /* Half-guess something? */
-    bytes_per_second = 1*1024*1024;
-    break;
-  }
-  return bytes_per_second;
+    int bytes_per_second;
+    
+    /*
+     * We don't know the actual speeds so these are rough guesses
+     * from the info you can find here:
+     * http://en.wikipedia.org/wiki/USB#Transfer_rates
+     * http://www.barefeats.com/usb2.html
+     */
+    switch (ptp_usb->bcdusb & 0xFF00) {
+        case 0x0100:
+            /* 1.x USB versions let's say 1MiB/s */
+            bytes_per_second = 1*1024*1024;
+            break;
+        case 0x0200:
+        case 0x0300:
+            /* USB 2.0 nominal speed 18MiB/s */
+            /* USB 3.0 won't be worse? */
+            bytes_per_second = 18*1024*1024;
+            break;
+        default:
+            /* Half-guess something? */
+            bytes_per_second = 1*1024*1024;
+            break;
+    }
+    return bytes_per_second;
 }
 
 static int usb_get_endpoint_status(PTP_USB* ptp_usb, int ep, uint16_t* status)
 {
-  return libusb_control_transfer(ptp_usb->handle,
-			  LIBUSB_ENDPOINT_IN|LIBUSB_RECIPIENT_ENDPOINT,
-			  LIBUSB_REQUEST_GET_STATUS,
-                          USB_FEATURE_HALT,
-			  ep,
-			  (unsigned char *) status,
-			  2,
-			  ptp_usb->timeout);
+    return libusb_control_transfer(ptp_usb->handle,
+                                   LIBUSB_ENDPOINT_IN|LIBUSB_RECIPIENT_ENDPOINT,
+                                   LIBUSB_REQUEST_GET_STATUS,
+                                   USB_FEATURE_HALT,
+                                   ep,
+                                   (unsigned char *) status,
+                                   2,
+                                   ptp_usb->timeout);
 }

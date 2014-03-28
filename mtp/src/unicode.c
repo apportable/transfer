@@ -29,10 +29,15 @@
  *
  */
 
-//#include <config.h>
+#include "config.h"
+
 #include <stdlib.h>
 #include <string.h>
-#include <iconv.h>
+#ifdef HAVE_ICONV
+#include "iconv.h"
+#else
+#error "libmtp unicode.c needs fixing to work without iconv()!"
+#endif
 #include "libmtp.h"
 #include "unicode.h"
 #include "util.h"
@@ -55,11 +60,11 @@
  */
 int ucs2_strlen(uint16_t const * const unicstr)
 {
-  int length;
-
-  /* Unicode strings are terminated with 2 * 0x00 */
-  for(length = 0; unicstr[length] != 0x0000U; length ++);
-  return length;
+    int length;
+    
+    /* Unicode strings are terminated with 2 * 0x00 */
+    for(length = 0; unicstr[length] != 0x0000U; length ++);
+    return length;
 }
 
 /**
@@ -73,27 +78,27 @@ int ucs2_strlen(uint16_t const * const unicstr)
  */
 char *utf16_to_utf8(LIBMTP_mtpdevice_t *device, const uint16_t *unicstr)
 {
-  PTPParams *params = (PTPParams *) device->params;
-  char *stringp = (char *) unicstr;
-  char loclstr[STRING_BUFFER_LENGTH*3+1]; // UTF-8 encoding is max 3 bytes per UCS2 char.
-  char *locp = loclstr;
-  size_t nconv;
-  size_t convlen = (ucs2_strlen(unicstr)+1) * sizeof(uint16_t); // UCS-2 is 16 bit wide, include terminator
-  size_t convmax = STRING_BUFFER_LENGTH*3;
-
-  loclstr[0]='\0';
-  /* Do the conversion.  */
-  nconv = iconv(params->cd_ucs2_to_locale, &stringp, &convlen, &locp, &convmax);
-  if (nconv == (size_t) -1) {
-    // Return partial string anyway.
-    *locp = '\0';
-  }
-  loclstr[STRING_BUFFER_LENGTH*3] = '\0';
-  // Strip off any BOM, it's totally useless...
-  if ((uint8_t) loclstr[0] == 0xEFU && (uint8_t) loclstr[1] == 0xBBU && (uint8_t) loclstr[2] == 0xBFU) {
-    return strdup(loclstr+3);
-  }
-  return strdup(loclstr);
+    PTPParams *params = (PTPParams *) device->params;
+    char *stringp = (char *) unicstr;
+    char loclstr[STRING_BUFFER_LENGTH*3+1]; // UTF-8 encoding is max 3 bytes per UCS2 char.
+    char *locp = loclstr;
+    size_t nconv;
+    size_t convlen = (ucs2_strlen(unicstr)+1) * sizeof(uint16_t); // UCS-2 is 16 bit wide, include terminator
+    size_t convmax = STRING_BUFFER_LENGTH*3;
+    
+    loclstr[0]='\0';
+    /* Do the conversion.  */
+    nconv = iconv(params->cd_ucs2_to_locale, &stringp, &convlen, &locp, &convmax);
+    if (nconv == (size_t) -1) {
+        // Return partial string anyway.
+        *locp = '\0';
+    }
+    loclstr[STRING_BUFFER_LENGTH*3] = '\0';
+    // Strip off any BOM, it's totally useless...
+    if ((uint8_t) loclstr[0] == 0xEFU && (uint8_t) loclstr[1] == 0xBBU && (uint8_t) loclstr[2] == 0xBFU) {
+        return strdup(loclstr+3);
+    }
+    return strdup(loclstr);
 }
 
 /**
@@ -106,35 +111,35 @@ char *utf16_to_utf8(LIBMTP_mtpdevice_t *device, const uint16_t *unicstr)
  */
 uint16_t *utf8_to_utf16(LIBMTP_mtpdevice_t *device, const char *localstr)
 {
-  PTPParams *params = (PTPParams *) device->params;
-  char *stringp = (char *) localstr; // cast away "const"
-  char unicstr[(STRING_BUFFER_LENGTH+1)*2]; // UCS2 encoding is 2 bytes per UTF-8 char.
-  char *unip = unicstr;
-  size_t nconv = 0;
-  size_t convlen = strlen(localstr)+1; // utf8 bytes, include terminator
-  size_t convmax = STRING_BUFFER_LENGTH*2;
-
-  unicstr[0]='\0';
-  unicstr[1]='\0';
-
-  /* Do the conversion.  */
-  nconv = iconv(params->cd_locale_to_ucs2, &stringp, &convlen, &unip, &convmax);
-
-  if (nconv == (size_t) -1) {
-    // Return partial string anyway.
-    unip[0] = '\0';
-    unip[1] = '\0';
-  }
-  // make sure the string is null terminated
-  unicstr[STRING_BUFFER_LENGTH*2] = '\0';
-  unicstr[STRING_BUFFER_LENGTH*2+1] = '\0';
-
-  // allocate the string to be returned
-  // Note: can't use strdup since every other byte is a null byte
-  int ret_len = ucs2_strlen((uint16_t*)unicstr)*sizeof(uint16_t)+2;
-  uint16_t* ret = malloc(ret_len);
-  memcpy(ret,unicstr,(size_t)ret_len);
-  return ret;
+    PTPParams *params = (PTPParams *) device->params;
+    char *stringp = (char *) localstr; // cast away "const"
+    char unicstr[(STRING_BUFFER_LENGTH+1)*2]; // UCS2 encoding is 2 bytes per UTF-8 char.
+    char *unip = unicstr;
+    size_t nconv = 0;
+    size_t convlen = strlen(localstr)+1; // utf8 bytes, include terminator
+    size_t convmax = STRING_BUFFER_LENGTH*2;
+    
+    unicstr[0]='\0';
+    unicstr[1]='\0';
+    
+    /* Do the conversion.  */
+    nconv = iconv(params->cd_locale_to_ucs2, &stringp, &convlen, &unip, &convmax);
+    
+    if (nconv == (size_t) -1) {
+        // Return partial string anyway.
+        unip[0] = '\0';
+        unip[1] = '\0';
+    }
+    // make sure the string is null terminated
+    unicstr[STRING_BUFFER_LENGTH*2] = '\0';
+    unicstr[STRING_BUFFER_LENGTH*2+1] = '\0';
+    
+    // allocate the string to be returned
+    // Note: can't use strdup since every other byte is a null byte
+    int ret_len = ucs2_strlen((uint16_t*)unicstr)*sizeof(uint16_t)+2;
+    uint16_t* ret = malloc(ret_len);
+    memcpy(ret,unicstr,(size_t)ret_len);
+    return ret;
 }
 
 /**
@@ -146,24 +151,24 @@ uint16_t *utf8_to_utf16(LIBMTP_mtpdevice_t *device, const char *localstr)
  */
 void strip_7bit_from_utf8(char *str)
 {
-  int i,j,k;
-  i = 0;
-  j = 0;
-  k = strlen(str);
-  while (i < k) {
-    if ((uint8_t) str[i] > 0x7FU) {
-      str[j] = '_';
-      i++;
-      // Skip over any consequtive > 0x7F chars.
-      while((uint8_t) str[i] > 0x7FU) {
-	i++;
-      }
-    } else {
-      str[j] = str[i];
-      i++;
+    int i,j,k;
+    i = 0;
+    j = 0;
+    k = strlen(str);
+    while (i < k) {
+        if ((uint8_t) str[i] > 0x7FU) {
+            str[j] = '_';
+            i++;
+            // Skip over any consequtive > 0x7F chars.
+            while((uint8_t) str[i] > 0x7FU) {
+                i++;
+            }
+        } else {
+            str[j] = str[i];
+            i++;
+        }
+        j++;
     }
-    j++;
-  }
-  // Terminate stripped string...
-  str[j] = '\0';
+    // Terminate stripped string...
+    str[j] = '\0';
 }

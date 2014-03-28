@@ -22,7 +22,7 @@
 #ifndef MTPZ_H_INCLUSION_GUARD
 #define MTPZ_H_INCLUSION_GUARD
 
-//#include "config.h" /* USE_MTPZ or not */
+#include "config.h" /* USE_MTPZ or not */
 #include "ptp.h" /* PTPParams */
 
 #ifdef USE_MTPZ
@@ -35,12 +35,12 @@ int mtpz_loaddata(void);
 /* Stubs if mtpz is unused */
 static inline uint16_t ptp_mtpz_handshake (PTPParams* params)
 {
-  return PTP_RC_OperationNotSupported;
+    return PTP_RC_OperationNotSupported;
 }
 
 static inline int mtpz_loaddata(void)
 {
-  return -1;
+    return -1;
 }
 
 #endif

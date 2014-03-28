@@ -19,6 +19,8 @@
  * Boston, MA 02111-1307, USA.
  *
  * This file provides mtp zune cryptographic setup interfaces.
+ * It is also used with Windows Phone 7, but Microsoft/Nokiad seem
+ * to have discontinued MTPZ on Windows Phone 8.
  *
  * DISCLAIMER:
  *
@@ -31,7 +33,7 @@
  * that you talk to Microsoft about providing the proper numbers if
  * you want to use this facility.
  */
-//#include "config.h"
+#include "config.h"
 #include "libmtp.h"
 #include "unicode.h"
 #include "ptp.h"
@@ -82,15 +84,15 @@ static char *MTPZ_CERTIFICATES;
 static char *fgets_strip(char * str, int num, FILE * stream)
 {
 	char *result = str;
-
+    
 	if ((result = fgets(str, num, stream)))
 	{
 		size_t newlen = strlen(result);
-
+        
 		if (result[newlen - 1] == '\n')
 			result[newlen - 1] = '\0';
 	}
-
+    
 	return result;
 }
 
@@ -98,17 +100,17 @@ static char *hex_to_bytes(char *hex, size_t len)
 {
 	if (len % 2)
 		return NULL;
-
+    
 	char *bytes = malloc(len / 2);
 	unsigned int u;
 	int i = 0;
-
+    
 	while (i < len && sscanf(hex + i, "%2x", &u) == 1)
 	{
 		bytes[i / 2] = u;
 		i += 2;
 	}
-
+    
 	return bytes;
 }
 
@@ -117,72 +119,72 @@ int mtpz_loaddata()
 	char *home = getenv("HOME");
 	if (!home)
 	{
-		LIBMTP_INFO("Error: Unable to determine user's home directory.\n");
+		LIBMTP_ERROR("Unable to determine user's home directory, MTPZ disabled");
 		return -1;
 	}
-
+    
 	int plen = strlen(home) + strlen("/.mtpz-data") + 1;
 	char path[plen];
 	sprintf(path, "%s/.mtpz-data", home);
-
+    
 	FILE *fdata = fopen(path, "r");
 	if (!fdata)
 	{
-		LIBMTP_INFO("Error: Unable to open ~/.mtpz-data for reading.\n");
+		LIBMTP_ERROR("Unable to open ~/.mtpz-data for reading, MTPZ disabled.");
 		return -1;
 	}
-
+    
 	// Should only be six characters in length, but fgets will encounter a newline and stop.
 	MTPZ_PUBLIC_EXPONENT = (unsigned char *)fgets_strip((char *)malloc(8), 8, fdata);
 	if (!MTPZ_PUBLIC_EXPONENT)
 	{
-		LIBMTP_INFO("Error: Unable to read MTPZ public exponent from ~/.mtpz-data\n");
+		LIBMTP_ERROR("Unable to read MTPZ public exponent from ~/.mtpz-data, MTPZ disabled");
 		return -1;
 	}
-
+    
 	// Should only be 33 characters in length, but fgets will encounter a newline and stop.
 	char *hexenckey = (unsigned char *)fgets_strip((char *)malloc(35), 35, fdata);
 	if (!hexenckey)
 	{
-		LIBMTP_INFO("Error: Unable to read MTPZ encryption key from ~/.mtpz-data\n");
+		LIBMTP_ERROR("Unable to read MTPZ encryption key from ~/.mtpz-data, MTPZ disabled");
 		return -1;
 	}
 	MTPZ_ENCRYPTION_KEY = hex_to_bytes(hexenckey, strlen(hexenckey));
 	if (!MTPZ_ENCRYPTION_KEY)
 	{
-		LIBMTP_INFO("Error: Unable to read MTPZ encryption key from ~/.mtpz-data\n");
+		LIBMTP_ERROR("Unable to read MTPZ encryption key from ~/.mtpz-data, MTPZ disabled");
 	}
-
+    
 	// Should only be 256 characters in length, but fgets will encounter a newline and stop.
 	MTPZ_MODULUS = (unsigned char *)fgets_strip((char *)malloc(260), 260, fdata);
 	if (!MTPZ_MODULUS)
 	{
-		LIBMTP_INFO("Error: Unable to read MTPZ modulus from ~/.mtpz-data\n");
+		LIBMTP_ERROR("Unable to read MTPZ modulus from ~/.mtpz-data, MTPZ disabled");
 		return -1;
 	}
-
+    
 	// Should only be 256 characters in length, but fgets will encounter a newline and stop.
 	MTPZ_PRIVATE_KEY = (unsigned char *)fgets_strip((char *)malloc(260), 260, fdata);
 	if (!MTPZ_PRIVATE_KEY)
 	{
-		LIBMTP_INFO("Error: Unable to read MTPZ private key from ~/.mtpz-data\n");
+		LIBMTP_ERROR("Unable to read MTPZ private key from ~/.mtpz-data, MTPZ disabled");
 		return -1;
 	}
-
+    
 	// Should only be 1258 characters in length, but fgets will encounter the end of the file and stop.
 	char *hexcerts = fgets_strip((char *)malloc(1260), 1260, fdata);
 	if (!hexcerts)
 	{
-		LIBMTP_INFO("Error: Unable to read MTPZ certificates from ~/.mtpz-data\n");
+		LIBMTP_ERROR("Unable to read MTPZ certificates from ~/.mtpz-data, MTPZ disabled");
 		return -1;
 	}
 	MTPZ_CERTIFICATES = hex_to_bytes(hexcerts, strlen(hexcerts));
 	if (!MTPZ_CERTIFICATES)
 	{
-		LIBMTP_INFO("Error: Unable to parse MTPZ certificates from ~/.mtpz-data\n");
+		LIBMTP_ERROR("Unable to parse MTPZ certificates from ~/.mtpz-data, MTPZ disabled");
 		return -1;
 	}
-
+    
 	return 0;
 }
 /* MTPZ RSA */
@@ -236,7 +238,7 @@ unsigned int mtpz_aes_gb9[];
 #define MTPZ_ENCRYPTIONBYTE2(val) (((val) >>  8) & 0xFF)
 #define MTPZ_ENCRYPTIONBYTE3(val) (((val) >>  0) & 0xFF)
 
-#define MTPZ_SWAP(x) __builtin_bswap32(x)
+#define MTPZ_SWAP(x) mtpz_bswap32(x)
 
 void mtpz_encryption_cipher(unsigned char *data, unsigned int len, char encrypt);
 void mtpz_encryption_cipher_advanced(unsigned char *key, unsigned int key_len, unsigned char *data, unsigned int data_len, char encrypt);
@@ -248,6 +250,17 @@ void mtpz_encryption_encrypt_custom(unsigned char *data, unsigned char *seed, un
 void mtpz_encryption_encrypt_mac(unsigned char *hash, unsigned int hash_length, unsigned char *seed, unsigned int seed_len, unsigned char *out);
 
 
+static inline uint32_t mtpz_bswap32(uint32_t x)
+{
+#if defined __GNUC__ && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 3)) || defined(__clang__)
+	return __builtin_bswap32(x);
+#else
+	return (x >> 24) |
+    ((x >> 8) & 0x0000ff00) |
+    ((x << 8) & 0x00ff0000) |
+    (x << 24);
+#endif
+}
 
 
 /* MTPZ RSA implementation */
@@ -255,20 +268,20 @@ mtpz_rsa_t *mtpz_rsa_init(const unsigned char *str_modulus, const unsigned char 
 {
 	mtpz_rsa_t *rsa = (mtpz_rsa_t *)malloc(sizeof(mtpz_rsa_t));
 	memset(rsa, 0, sizeof(rsa));
-
+    
 	gcry_mpi_t mpi_modulus, mpi_privkey, mpi_pubexp;
-
+    
 	gcry_mpi_scan(&mpi_modulus, GCRYMPI_FMT_HEX, str_modulus, 0, NULL);
 	gcry_mpi_scan(&mpi_privkey, GCRYMPI_FMT_HEX, str_privkey, 0, NULL);
 	gcry_mpi_scan(&mpi_pubexp, GCRYMPI_FMT_HEX, str_pubexp, 0, NULL);
-
+    
 	gcry_sexp_build(&rsa->privkey, NULL, "(private-key (rsa (n %m) (e %m) (d %m)))", mpi_modulus, mpi_pubexp, mpi_privkey);
 	gcry_sexp_build(&rsa->pubkey, NULL, "(public-key (rsa (n %m) (e %m)))", mpi_modulus, mpi_pubexp);
-
+    
 	gcry_mpi_release(mpi_modulus);
 	gcry_mpi_release(mpi_privkey);
 	gcry_mpi_release(mpi_pubexp);
-
+    
 	return rsa;
 }
 
@@ -282,35 +295,35 @@ int mtpz_rsa_decrypt(int flen, unsigned char *from, int tlen, unsigned char *to,
 {
 	gcry_mpi_t mpi_from;
 	gcry_mpi_scan(&mpi_from, GCRYMPI_FMT_USG, from, flen, NULL);
-
+    
 	gcry_sexp_t sexp_data;
 	gcry_sexp_build(&sexp_data, NULL, "(enc-val (flags raw) (rsa (a %m)))", mpi_from);
-
+    
 	gcry_sexp_t sexp_plain;
 	gcry_pk_decrypt(&sexp_plain, sexp_data, rsa->privkey);
-
+    
 	gcry_mpi_t mpi_value = gcry_sexp_nth_mpi(sexp_plain, 1, GCRYMPI_FMT_USG);
-
+    
 	// Lame workaround. GCRYMPI_FMT_USG gets rid of any leading zeroes which we do need,
 	// so we'll count how many bits are being used, and subtract that from how many bits actually
 	// should be there, and then write into our output array shifted over however many bits/8.
 	int bitshift = (tlen * 8) - gcry_mpi_get_nbits(mpi_value);
 	size_t written;
-
+    
 	if (bitshift / 8)
 	{
 		memset(to, 0, bitshift / 8);
 		to += bitshift / 8;
 		tlen -= bitshift / 8;
 	}
-
+    
 	gcry_mpi_print(GCRYMPI_FMT_USG, to, tlen, &written, mpi_value);
-
+    
 	gcry_mpi_release(mpi_from);
 	gcry_mpi_release(mpi_value);
 	gcry_sexp_release(sexp_data);
 	gcry_sexp_release(sexp_plain);
-
+    
 	return (int)written;
 }
 
@@ -324,17 +337,17 @@ int mtpz_rsa_sign(int flen, unsigned char *from, int tlen, unsigned char *to, mt
 static char *mtpz_hash_init_state()
 {
 	char *s = (char *)malloc(92);
-
+    
 	if (s != NULL)
 		memset(s, 0, 92);
-
+    
 	return s;
 }
 
 void mtpz_hash_reset_state(char *state)
 {
 	int *state_box = (int *)(state + 64);
-
+    
 	/*
 	 * Constants from
 	 * http://csrc.nist.gov/publications/fips/fips180-2/fips180-2withchangenotice.pdf
@@ -352,18 +365,18 @@ void mtpz_hash_reset_state(char *state)
 void mtpz_hash_transform_hash(char *state, char *msg, int len)
 {
 	int *state_box = (int *)(state + 64);
-
+    
 	int x = state_box[MTPZ_HASHSTATE_88] & 0x3F;
 	int v5 = len + state_box[MTPZ_HASHSTATE_88];
 	state_box[MTPZ_HASHSTATE_88] = v5;
-
+    
 	int i = len, j = 0;
 	int a1 = 0;
 	int c = 0;
-
+    
 	if (len > v5)
 		state_box[MTPZ_HASHSTATE_84] += 1;
-
+    
 	if (x)
 	{
 		if (len + x > 0x3F)
@@ -372,21 +385,21 @@ void mtpz_hash_transform_hash(char *state, char *msg, int len)
 			{
 				state[x + a1] = msg[a1];
 			}
-
+            
 			i = len + x - 64;
 			j = 64 - x;
-
+            
 			mtpz_hash_compute_hash(state, state, 64);
 		}
 	}
-
+    
 	while (i > 63)
 	{
 		mtpz_hash_compute_hash(state, msg + j, 64);
 		j += 64;
 		i -= 64;
 	}
-
+    
 	if (i != 0)
 	{
 		for (c = 0; c < i; c++)
@@ -400,35 +413,35 @@ void mtpz_hash_transform_hash(char *state, char *msg, int len)
 void mtpz_hash_finalize_hash(char *state, char *out)
 {
 	int *state_box = (int *)(state + 64);
-
+    
 	int v2 = 64 - (state_box[MTPZ_HASHSTATE_88] & 0x3F);
 	int v6, v7;
-
+    
 	if (v2 <= 8)
 		v2 += 64;
-
+    
 	char *v5 = (char *)malloc(72);
 	memset(v5, 0, 72);
-
+    
 	v5[0] = '\x80';
 	v6 = 8 * state_box[MTPZ_HASHSTATE_84] | (state_box[MTPZ_HASHSTATE_88] >> 29);
 	v7 = 8 * state_box[MTPZ_HASHSTATE_88];
-
+    
 	v6 = MTPZ_SWAP(v6);
 	v7 = MTPZ_SWAP(v7);
-
+    
 	*(int *)(v5 + v2 - 8) = v6;
 	*(int *)(v5 + v2 - 4) = v7;
-
+    
 	mtpz_hash_transform_hash(state, v5, v2);
-
+    
 	int *out_int = (int *)out;
 	out_int[0] = MTPZ_SWAP(state_box[0]);
 	out_int[1] = MTPZ_SWAP(state_box[1]);
 	out_int[2] = MTPZ_SWAP(state_box[2]);
 	out_int[3] = MTPZ_SWAP(state_box[3]);
 	out_int[4] = MTPZ_SWAP(state_box[4]);
-
+    
 	memset(state, 0, 64);
 	mtpz_hash_reset_state(state);
 }
@@ -440,54 +453,54 @@ char *mtpz_hash_custom6A5DC(char *state, char *msg, int len, int a4)
 	char *v5 = (char *)malloc(len + 4);
 	int i;
 	int k;
-
+    
 	memset(v13, 0, v11 * 20);
 	memset(v5, 0, len + 4);
 	memcpy(v5, msg, len);
-
+    
 	for (i = 0; i < v11; i++)
 	{
 		k = MTPZ_SWAP(i);
 		*(int *)(v5 + len) = k;
-
+        
 		mtpz_hash_reset_state(state);
 		mtpz_hash_transform_hash(state, v5, len + 4);
 		mtpz_hash_finalize_hash(state, v13 + i * 20);
 	}
-
+    
 	free(v5); v5 = NULL;
-
+    
 	return v13;
 }
 
 void mtpz_hash_compute_hash(char *state, char *msg, int len)
 {
 	int *state_box = (int *)(state + 64);
-
+    
 	const unsigned int K[] = { 0x5a827999, 0x6ed9eba1, 0x8f1bbcdc, 0xca62c1d6 };
-
+    
 	if (len != 64)
 		return;
-
+    
 	int *M = (int *)msg;
-
+    
 	// HASH COMPUTATION
 	unsigned int W[80];
 	unsigned int a, b, c, d, e;
 	int i, s;
 	unsigned int T;
-
+    
 	// 1 - prepare message schedule 'W'.
 	for (i = 0; i < 16; i++) W[i] = MTPZ_SWAP(M[i]);
 	for (i = 16; i < 80; i++) W[i] = mtpz_hash_rotate_left(W[i - 3] ^ W[i - 8] ^ W[i - 14] ^ W[i - 16], 1);
-
+    
 	// 2 - initialize five working variables a, b, c, d, e with previous hash value
 	a = state_box[0];
 	b = state_box[1];
 	c = state_box[2];
 	d = state_box[3];
 	e = state_box[4];
-
+    
 	// 3 - main loop
 	for (i = 0; i < 80; i++)
 	{
@@ -499,7 +512,7 @@ void mtpz_hash_compute_hash(char *state, char *msg, int len)
 		b = a;
 		a = T;
 	}
-
+    
 	state_box[0] = (state_box[0] + a) & 0xFFFFFFFF;
 	state_box[1] = (state_box[1] + b) & 0xFFFFFFFF;
 	state_box[2] = (state_box[2] + c) & 0xFFFFFFFF;
@@ -511,16 +524,16 @@ unsigned int mtpz_hash_f(int s, unsigned int x, unsigned int y, unsigned int z)
 {
 	switch (s)
 	{
-	case 0:
-		return (x & y) ^ (~x & z); // Ch()
-	case 1:
-		return x ^ y ^ z; // Parity()
-	case 2:
-		return (x & y) ^ (x & z) ^ (y & z); // Maj()
-	case 3:
-		return x ^ y ^ z; // Parity()
+        case 0:
+            return (x & y) ^ (~x & z); // Ch()
+        case 1:
+            return x ^ y ^ z; // Parity()
+        case 2:
+            return (x & y) ^ (x & z) ^ (y & z); // Maj()
+        case 3:
+            return x ^ y ^ z; // Parity()
 	}
-
+    
 	return 0;
 }
 
@@ -534,14 +547,14 @@ unsigned int mtpz_hash_rotate_left(unsigned int x, int n)
 void mtpz_encryption_cipher(unsigned char *data, unsigned int len, char encrypt)
 {
 	unsigned char *expanded = NULL;
-
+    
 	int offset = 0, count = len;
-
+    
 	if ((count & 0x0F) == 0)
 	{
 		int exp_len = 0;
 		expanded = mtpz_encryption_expand_key((unsigned char *)MTPZ_ENCRYPTION_KEY, 16, 10, &exp_len);
-
+        
 		if (count != 0)
 		{
 			do
@@ -550,7 +563,7 @@ void mtpz_encryption_cipher(unsigned char *data, unsigned int len, char encrypt)
 					mtpz_encryption_encrypt_custom(data + offset, NULL, expanded);
 				else
 					mtpz_encryption_decrypt_custom(data + offset, NULL, expanded);
-
+                
 				count -= 16;
 				offset += 16;
 			}
@@ -562,38 +575,38 @@ void mtpz_encryption_cipher(unsigned char *data, unsigned int len, char encrypt)
 void mtpz_encryption_cipher_advanced(unsigned char *key, unsigned int key_len, unsigned char *data, unsigned int data_len, char encrypt)
 {
 	int len = (key_len == 16) ? 10 :
-			  (key_len == 24) ? 12 : 32;
+    (key_len == 24) ? 12 : 32;
 	int exp_len;
 	unsigned char *expanded = mtpz_encryption_expand_key(key, key_len, len, &exp_len);
-
+    
 	int offset = 0, count = data_len;
 	unsigned char *out = (unsigned char *)malloc(16);
 	unsigned int *out_int = (unsigned int *)out;
 	unsigned int *data_int = (unsigned int *)data;
 	unsigned int *dtf = (unsigned int *)malloc(16);
 	memset((unsigned char *)dtf, 0, 16);
-
+    
 	while (count != 0)
 	{
 		int chunk = 16;
-
+        
 		if (count < 16)
 		{
 			memset(out, 0, 16);
 			chunk = count;
 		}
-
+        
 		memcpy(out, data + offset, chunk);
-
+        
 		if (encrypt)
 		{
 			out_int[0] ^= MTPZ_SWAP(dtf[0]);
 			out_int[1] ^= MTPZ_SWAP(dtf[1]);
 			out_int[2] ^= MTPZ_SWAP(dtf[2]);
 			out_int[3] ^= MTPZ_SWAP(dtf[3]);
-
+            
 			mtpz_encryption_encrypt_custom(data + offset, out, expanded);
-
+            
 			dtf[0] = MTPZ_SWAP(data_int[(offset / 4) + 0]);
             dtf[1] = MTPZ_SWAP(data_int[(offset / 4) + 1]);
             dtf[2] = MTPZ_SWAP(data_int[(offset / 4) + 2]);
@@ -602,22 +615,22 @@ void mtpz_encryption_cipher_advanced(unsigned char *key, unsigned int key_len, u
 		else
 		{
 			mtpz_encryption_decrypt_custom(data + offset, out, expanded);
-
+            
 			data_int[(offset / 4) + 0] ^= MTPZ_SWAP(dtf[0]);
 			data_int[(offset / 4) + 1] ^= MTPZ_SWAP(dtf[1]);
 			data_int[(offset / 4) + 2] ^= MTPZ_SWAP(dtf[2]);
 			data_int[(offset / 4) + 3] ^= MTPZ_SWAP(dtf[3]);
-
+            
 			dtf[0] = MTPZ_SWAP(out_int[0]);
 			dtf[1] = MTPZ_SWAP(out_int[1]);
 			dtf[2] = MTPZ_SWAP(out_int[2]);
 			dtf[3] = MTPZ_SWAP(out_int[3]);
 		}
-
+        
 		offset += chunk;
 		count -= chunk;
 	}
-
+    
 	free(out);
 	free(dtf);
 	free(expanded);
@@ -630,37 +643,37 @@ unsigned char *mtpz_encryption_expand_key(unsigned char *constant, int key_len, 
 	unsigned char *back = (unsigned char *)malloc(484);
 	memset(back, 0, 484);
 	*out_len = 484;
-
+    
 	unsigned char *inner;
 	int inner_len;
 	mtpz_encryption_expand_key_inner(constant, key_len, &inner, &inner_len);
-
+    
 	back[i] = (unsigned char)(count % 0xFF);
 	i += 4;
-
+    
 	memcpy(back + i, inner, inner_len);
 	i += inner_len;
 	memcpy(back + i, inner, inner_len);
 	i += inner_len;
-
+    
 	switch (count)
 	{
-	case 10:
-		seek = 0xB4;
-		break;
-
-	case 12:
-		seek = 0xD4;
-		break;
-
-	case 14:
-	default:
-		seek = 0xF4;
-		break;
+        case 10:
+            seek = 0xB4;
+            break;
+            
+        case 12:
+            seek = 0xD4;
+            break;
+            
+        case 14:
+        default:
+            seek = 0xF4;
+            break;
 	}
-
+    
 	mtpz_encryption_inv_mix_columns(back, seek, count);
-
+    
 	return back;
 }
 
@@ -669,38 +682,38 @@ void mtpz_encryption_expand_key_inner(unsigned char *constant, int key_len, unsi
 	int ks = -1;
 	int rcon_i = 0;
 	int i = 0, j = 0;
-
+    
 	switch (key_len)
 	{
 		case 16:
 			ks = 16 * (10 + 1);
 			break;
-
+            
 		case 24:
 			ks = 16 * (12 + 1);
 			break;
-
+            
 		case 32:
 			ks = 16 * (14 + 1);
 			break;
-
+            
 		default:
 			*out = NULL;
 			*out_len = 0;
 	}
-
+    
 	unsigned char *key = (unsigned char *)malloc(ks);
 	unsigned char *temp = (unsigned char *)malloc(4);
 	memcpy(key, constant, key_len);
 	unsigned char t0, t1, t2, t3;
-
+    
 	for (i = key_len; i < ks; i += 4)
 	{
 		temp[0] = t0 = key[i - 4];
 		temp[1] = t1 = key[i - 3];
 		temp[2] = t2 = key[i - 2];
 		temp[3] = t3 = key[i - 1];
-
+        
 		if (i % key_len == 0)
 		{
 			temp[0] = (mtpz_aes_sbox[t1] ^ mtpz_aes_rcon[rcon_i]) & 0xFF;
@@ -716,15 +729,15 @@ void mtpz_encryption_expand_key_inner(unsigned char *constant, int key_len, unsi
 			temp[2] = mtpz_aes_sbox[t2];
 			temp[3] = mtpz_aes_sbox[t3];
 		}
-
+        
 		for (j = 0; j < 4; j++)
 		{
 			key[i + j] = (unsigned char)((key[i + j - key_len] ^ temp[j]) & 0xFF);
 		}
 	}
-
+    
 	free(temp);
-
+    
 	*out = key;
 	*out_len = ks;
 }
@@ -733,11 +746,11 @@ void mtpz_encryption_inv_mix_columns(unsigned char *expanded, int offset, int ro
 {
 	int v8 = 1, o = offset;
 	unsigned int *exp_int = NULL;
-
+    
 	for (v8 = 1; v8 < rounds; v8++)
 	{
 		exp_int = (unsigned int *)(expanded + o + 16);
-
+        
 		exp_int[0] = MTPZ_SWAP(mtpz_aes_gb9[expanded[o + 19]] ^ mtpz_aes_gb13[expanded[o + 18]] ^ mtpz_aes_gb11[expanded[o + 17]] ^ mtpz_aes_gb14[expanded[o + 16]]);
 		exp_int[1] = MTPZ_SWAP(mtpz_aes_gb9[expanded[o + 23]] ^ mtpz_aes_gb13[expanded[o + 22]] ^ mtpz_aes_gb11[expanded[o + 21]] ^ mtpz_aes_gb14[expanded[o + 20]]);
 		exp_int[2] = MTPZ_SWAP(mtpz_aes_gb9[expanded[o + 27]] ^ mtpz_aes_gb13[expanded[o + 26]] ^ mtpz_aes_gb11[expanded[o + 25]] ^ mtpz_aes_gb14[expanded[o + 24]]);
@@ -751,70 +764,70 @@ void mtpz_encryption_decrypt_custom(unsigned char *data, unsigned char *seed, un
 	unsigned int *u_data = (unsigned int *)data;
 	unsigned int *u_expanded = (unsigned int *)expanded;
 	int keyOffset = 0xB4 + 0xA0;
-
+    
 	unsigned int *u_seed;
-
+    
 	if (seed == NULL)
 		u_seed = u_data;
 	else
 		u_seed = (unsigned int *)seed;
-
+    
 	unsigned int v14 = MTPZ_SWAP(u_seed[0]) ^ MTPZ_SWAP(u_expanded[(keyOffset     ) / 4]);
 	unsigned int v15 = MTPZ_SWAP(u_seed[1]) ^ MTPZ_SWAP(u_expanded[(keyOffset +  4) / 4]);
 	unsigned int v16 = MTPZ_SWAP(u_seed[2]) ^ MTPZ_SWAP(u_expanded[(keyOffset +  8) / 4]);
 	unsigned int v17 = MTPZ_SWAP(u_seed[3]) ^ MTPZ_SWAP(u_expanded[(keyOffset + 12) / 4]);
-
+    
 	unsigned int v18 = mtpz_aes_rt1[MTPZ_ENCRYPTIONBYTE3(v15)] ^ mtpz_aes_rt2[MTPZ_ENCRYPTIONBYTE2(v16)] ^ mtpz_aes_rt3[MTPZ_ENCRYPTIONLOBYTE(v14)] ^ mtpz_aes_rt4[MTPZ_ENCRYPTIONBYTE1(v17)];
 	unsigned int v19 = mtpz_aes_rt1[MTPZ_ENCRYPTIONBYTE3(v16)] ^ mtpz_aes_rt2[MTPZ_ENCRYPTIONBYTE2(v17)] ^ mtpz_aes_rt3[MTPZ_ENCRYPTIONLOBYTE(v15)] ^ mtpz_aes_rt4[MTPZ_ENCRYPTIONBYTE1(v14)];
 	unsigned int v20 = mtpz_aes_rt1[MTPZ_ENCRYPTIONBYTE3(v17)] ^ mtpz_aes_rt2[MTPZ_ENCRYPTIONBYTE2(v14)] ^ mtpz_aes_rt3[MTPZ_ENCRYPTIONLOBYTE(v16)] ^ mtpz_aes_rt4[MTPZ_ENCRYPTIONBYTE1(v15)];
 	unsigned int v21 = mtpz_aes_rt1[MTPZ_ENCRYPTIONBYTE3(v14)] ^ mtpz_aes_rt2[MTPZ_ENCRYPTIONBYTE2(v15)] ^ mtpz_aes_rt3[MTPZ_ENCRYPTIONLOBYTE(v17)] ^ mtpz_aes_rt4[MTPZ_ENCRYPTIONBYTE1(v16)];
-
+    
 	keyOffset -= 16;
 	int rounds = 9;
-
+    
 	do
 	{
 		v14 = v18 ^ MTPZ_SWAP(u_expanded[(keyOffset     ) / 4]);
 		v15 = v19 ^ MTPZ_SWAP(u_expanded[(keyOffset +  4) / 4]);
 		v16 = v20 ^ MTPZ_SWAP(u_expanded[(keyOffset +  8) / 4]);
 		v17 = v21 ^ MTPZ_SWAP(u_expanded[(keyOffset + 12) / 4]);
-
+        
 		v18 = mtpz_aes_rt1[MTPZ_ENCRYPTIONBYTE3(v15)] ^ mtpz_aes_rt2[MTPZ_ENCRYPTIONBYTE2(v16)] ^ mtpz_aes_rt3[MTPZ_ENCRYPTIONLOBYTE(v14)] ^ mtpz_aes_rt4[MTPZ_ENCRYPTIONBYTE1(v17)];
 		v19 = mtpz_aes_rt1[MTPZ_ENCRYPTIONBYTE3(v16)] ^ mtpz_aes_rt2[MTPZ_ENCRYPTIONBYTE2(v17)] ^ mtpz_aes_rt3[MTPZ_ENCRYPTIONLOBYTE(v15)] ^ mtpz_aes_rt4[MTPZ_ENCRYPTIONBYTE1(v14)];
 		v20 = mtpz_aes_rt1[MTPZ_ENCRYPTIONBYTE3(v17)] ^ mtpz_aes_rt2[MTPZ_ENCRYPTIONBYTE2(v14)] ^ mtpz_aes_rt3[MTPZ_ENCRYPTIONLOBYTE(v16)] ^ mtpz_aes_rt4[MTPZ_ENCRYPTIONBYTE1(v15)];
 		v21 = mtpz_aes_rt1[MTPZ_ENCRYPTIONBYTE3(v14)] ^ mtpz_aes_rt2[MTPZ_ENCRYPTIONBYTE2(v15)] ^ mtpz_aes_rt3[MTPZ_ENCRYPTIONLOBYTE(v17)] ^ mtpz_aes_rt4[MTPZ_ENCRYPTIONBYTE1(v16)];
-
+        
 		rounds--;
 		keyOffset -= 16;
 	}
 	while (rounds != 1);
-
+    
 	v14 = v18 ^ MTPZ_SWAP(u_expanded[(keyOffset     ) / 4]);
 	v15 = v19 ^ MTPZ_SWAP(u_expanded[(keyOffset +  4) / 4]);
 	v16 = v20 ^ MTPZ_SWAP(u_expanded[(keyOffset +  8) / 4]);
 	v17 = v21 ^ MTPZ_SWAP(u_expanded[(keyOffset + 12) / 4]);
 	keyOffset -= 16;
-
+    
 	v18 = ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONLOBYTE(v14)]) << 24) |
-		  ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONBYTE1 (v17)]) << 16) |
-		  ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONBYTE2 (v16)]) <<  8) |
-		  ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONBYTE3 (v15)]) <<  0);
-
+    ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONBYTE1 (v17)]) << 16) |
+    ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONBYTE2 (v16)]) <<  8) |
+    ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONBYTE3 (v15)]) <<  0);
+    
 	v19 = ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONLOBYTE(v15)]) << 24) |
-		  ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONBYTE1 (v14)]) << 16) |
-		  ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONBYTE2 (v17)]) <<  8) |
-		  ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONBYTE3 (v16)]) <<  0);
-
+    ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONBYTE1 (v14)]) << 16) |
+    ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONBYTE2 (v17)]) <<  8) |
+    ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONBYTE3 (v16)]) <<  0);
+    
 	v20 = ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONLOBYTE(v16)]) << 24) |
-		  ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONBYTE1 (v15)]) << 16) |
-		  ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONBYTE2 (v14)]) <<  8) |
-		  ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONBYTE3 (v17)]) <<  0);
-
+    ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONBYTE1 (v15)]) << 16) |
+    ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONBYTE2 (v14)]) <<  8) |
+    ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONBYTE3 (v17)]) <<  0);
+    
 	v21 = ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONLOBYTE(v17)]) << 24) |
-		  ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONBYTE1 (v16)]) << 16) |
-		  ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONBYTE2 (v15)]) <<  8) |
-		  ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONBYTE3 (v14)]) <<  0);
-
+    ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONBYTE1 (v16)]) << 16) |
+    ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONBYTE2 (v15)]) <<  8) |
+    ((mtpz_aes_invsbox[MTPZ_ENCRYPTIONBYTE3 (v14)]) <<  0);
+    
 	u_data[0] = MTPZ_SWAP(v18 ^ MTPZ_SWAP(u_expanded[(keyOffset     ) / 4]));
 	u_data[1] = MTPZ_SWAP(v19 ^ MTPZ_SWAP(u_expanded[(keyOffset +  4) / 4]));
 	u_data[2] = MTPZ_SWAP(v20 ^ MTPZ_SWAP(u_expanded[(keyOffset +  8) / 4]));
@@ -826,73 +839,73 @@ void mtpz_encryption_encrypt_custom(unsigned char *data, unsigned char *seed, un
 	unsigned int *u_data = (unsigned int *)data;
 	unsigned int *u_expanded = (unsigned int *)expanded;
 	int keyOffset = 0x04;
-
+    
 	unsigned int *u_seed;
-
+    
 	if (seed == NULL)
 		u_seed = u_data;
 	else
 		u_seed = (unsigned int *)seed;
-
+    
 	unsigned int v14 = MTPZ_SWAP(u_seed[0]) ^ MTPZ_SWAP(u_expanded[(keyOffset     ) / 4]);
 	unsigned int v15 = MTPZ_SWAP(u_seed[1]) ^ MTPZ_SWAP(u_expanded[(keyOffset +  4) / 4]);
 	unsigned int v16 = MTPZ_SWAP(u_seed[2]) ^ MTPZ_SWAP(u_expanded[(keyOffset +  8) / 4]);
 	unsigned int v17 = MTPZ_SWAP(u_seed[3]) ^ MTPZ_SWAP(u_expanded[(keyOffset + 12) / 4]);
-
+    
 	unsigned int v18 = mtpz_aes_ft1[MTPZ_ENCRYPTIONBYTE3(v17)] ^ mtpz_aes_ft2[MTPZ_ENCRYPTIONBYTE2(v16)] ^ mtpz_aes_ft3[MTPZ_ENCRYPTIONLOBYTE(v14)] ^ mtpz_aes_ft4[MTPZ_ENCRYPTIONBYTE1(v15)];
 	unsigned int v19 = mtpz_aes_ft1[MTPZ_ENCRYPTIONBYTE3(v14)] ^ mtpz_aes_ft2[MTPZ_ENCRYPTIONBYTE2(v17)] ^ mtpz_aes_ft3[MTPZ_ENCRYPTIONLOBYTE(v15)] ^ mtpz_aes_ft4[MTPZ_ENCRYPTIONBYTE1(v16)];
 	unsigned int v20 = mtpz_aes_ft1[MTPZ_ENCRYPTIONBYTE3(v15)] ^ mtpz_aes_ft2[MTPZ_ENCRYPTIONBYTE2(v14)] ^ mtpz_aes_ft3[MTPZ_ENCRYPTIONLOBYTE(v16)] ^ mtpz_aes_ft4[MTPZ_ENCRYPTIONBYTE1(v17)];
 	unsigned int v21 = mtpz_aes_ft1[MTPZ_ENCRYPTIONBYTE3(v16)] ^ mtpz_aes_ft2[MTPZ_ENCRYPTIONBYTE2(v15)] ^ mtpz_aes_ft3[MTPZ_ENCRYPTIONLOBYTE(v17)] ^ mtpz_aes_ft4[MTPZ_ENCRYPTIONBYTE1(v14)];
-
+    
 	keyOffset += 16;
 	int rounds = 1;
-
+    
 	do
 	{
-
+        
 		v14 = v18 ^ MTPZ_SWAP(u_expanded[(keyOffset     ) / 4]);
 		v15 = v19 ^ MTPZ_SWAP(u_expanded[(keyOffset +  4) / 4]);
 		v16 = v20 ^ MTPZ_SWAP(u_expanded[(keyOffset +  8) / 4]);
 		v17 = v21 ^ MTPZ_SWAP(u_expanded[(keyOffset + 12) / 4]);
-
+        
 		v18 = mtpz_aes_ft1[MTPZ_ENCRYPTIONBYTE3(v17)] ^ mtpz_aes_ft2[MTPZ_ENCRYPTIONBYTE2(v16)] ^ mtpz_aes_ft3[MTPZ_ENCRYPTIONLOBYTE(v14)] ^ mtpz_aes_ft4[MTPZ_ENCRYPTIONBYTE1(v15)];
 		v19 = mtpz_aes_ft1[MTPZ_ENCRYPTIONBYTE3(v14)] ^ mtpz_aes_ft2[MTPZ_ENCRYPTIONBYTE2(v17)] ^ mtpz_aes_ft3[MTPZ_ENCRYPTIONLOBYTE(v15)] ^ mtpz_aes_ft4[MTPZ_ENCRYPTIONBYTE1(v16)];
 		v20 = mtpz_aes_ft1[MTPZ_ENCRYPTIONBYTE3(v15)] ^ mtpz_aes_ft2[MTPZ_ENCRYPTIONBYTE2(v14)] ^ mtpz_aes_ft3[MTPZ_ENCRYPTIONLOBYTE(v16)] ^ mtpz_aes_ft4[MTPZ_ENCRYPTIONBYTE1(v17)];
 		v21 = mtpz_aes_ft1[MTPZ_ENCRYPTIONBYTE3(v16)] ^ mtpz_aes_ft2[MTPZ_ENCRYPTIONBYTE2(v15)] ^ mtpz_aes_ft3[MTPZ_ENCRYPTIONLOBYTE(v17)] ^ mtpz_aes_ft4[MTPZ_ENCRYPTIONBYTE1(v14)];
-
+        
 		rounds++;
 		keyOffset += 16;
 	}
 	while (rounds != 9);
-
+    
 	v14 = v18 ^ MTPZ_SWAP(u_expanded[(keyOffset     ) / 4]);
 	v15 = v19 ^ MTPZ_SWAP(u_expanded[(keyOffset +  4) / 4]);
 	v16 = v20 ^ MTPZ_SWAP(u_expanded[(keyOffset +  8) / 4]);
 	v17 = v21 ^ MTPZ_SWAP(u_expanded[(keyOffset + 12) / 4]);
 	keyOffset += 16;
-
+    
 	unsigned char *FT3_Bytes = (unsigned char *)mtpz_aes_ft3;
-
+    
 	v18 = ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONLOBYTE(v14)]) << 24) |
-		  ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONBYTE1 (v15)]) << 16) |
-		  ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONBYTE2 (v16)]) <<  8) |
-		  ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONBYTE3 (v17)]) <<  0);
-
+    ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONBYTE1 (v15)]) << 16) |
+    ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONBYTE2 (v16)]) <<  8) |
+    ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONBYTE3 (v17)]) <<  0);
+    
 	v19 = ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONLOBYTE(v15)]) << 24) |
-		  ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONBYTE1 (v16)]) << 16) |
-		  ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONBYTE2 (v17)]) <<  8) |
-		  ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONBYTE3 (v14)]) <<  0);
-
+    ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONBYTE1 (v16)]) << 16) |
+    ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONBYTE2 (v17)]) <<  8) |
+    ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONBYTE3 (v14)]) <<  0);
+    
 	v20 = ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONLOBYTE(v16)]) << 24) |
-		  ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONBYTE1 (v17)]) << 16) |
-		  ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONBYTE2 (v14)]) <<  8) |
-		  ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONBYTE3 (v15)]) <<  0);
-
+    ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONBYTE1 (v17)]) << 16) |
+    ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONBYTE2 (v14)]) <<  8) |
+    ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONBYTE3 (v15)]) <<  0);
+    
 	v21 = ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONLOBYTE(v17)]) << 24) |
-		  ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONBYTE1 (v14)]) << 16) |
-		  ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONBYTE2 (v15)]) <<  8) |
-		  ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONBYTE3 (v16)]) <<  0);
-
+    ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONBYTE1 (v14)]) << 16) |
+    ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONBYTE2 (v15)]) <<  8) |
+    ((FT3_Bytes[1 + 4 * MTPZ_ENCRYPTIONBYTE3 (v16)]) <<  0);
+    
 	u_data[0] = MTPZ_SWAP(v18 ^ MTPZ_SWAP(u_expanded[(keyOffset     ) / 4]));
 	u_data[1] = MTPZ_SWAP(v19 ^ MTPZ_SWAP(u_expanded[(keyOffset +  4) / 4]));
 	u_data[2] = MTPZ_SWAP(v20 ^ MTPZ_SWAP(u_expanded[(keyOffset +  8) / 4]));
@@ -903,49 +916,49 @@ void mtpz_encryption_encrypt_mac(unsigned char *hash, unsigned int hash_length, 
 {
 	if (hash == NULL || hash_length != 16)
 		return;
-
+    
 	unsigned char *loop1 = (unsigned char *)malloc(17);
 	memset(loop1, 0, 17);
 	unsigned char *loop2 = (unsigned char *)malloc(17);
 	memset(loop2, 0, 17);
 	int i = 0;
-
+    
 	{
 		unsigned char *enc_hash = (unsigned char *)malloc(17);
 		memset(enc_hash, 0, 17);
 		mtpz_encryption_cipher_advanced(hash, hash_length, enc_hash, 16, 1);
-
+        
 		for (i = 0; i < 16; i++)
 			loop1[i] = (unsigned char)((2 * enc_hash[i]) | (enc_hash[i + 1] >> 7));
-
+        
 		if (enc_hash[0] >= (unsigned char)128)
 			loop1[15] ^= (unsigned char)0x87;
-
+        
 		for (i = 0; i < 16; i++)
 			loop2[i] = (unsigned char)((2 * loop1[i]) | (loop1[i + 1] >> 7));
-
+        
 		if (loop1[0] >= (unsigned char)128)
 			loop2[15] ^= (unsigned char)0x87;
-
+        
 		free(enc_hash);
 	}
-
+    
 	{
 		int len = 	(hash_length == 16) ? 10 :
-					(hash_length == 24) ? 12 : 32;
+        (hash_length == 24) ? 12 : 32;
 		int exp_len;
 		unsigned char *expanded = mtpz_encryption_expand_key(hash, hash_length, len, &exp_len);
-
+        
 		unsigned char *actual_seed = (unsigned char *)malloc(16);
 		memset(actual_seed, 0, 16);
-
+        
 		int i = 0;
-
+        
 		if (seed_len == 16)
 		{
 			for (i = 0; i < 16; i++)
 				actual_seed[i] ^= seed[i];
-
+            
 			for (i = 0; i < 16; i++)
 				actual_seed[i] ^= loop1[i];
 		}
@@ -953,19 +966,19 @@ void mtpz_encryption_encrypt_mac(unsigned char *hash, unsigned int hash_length, 
 		{
 			for (i = 0; i < seed_len; i++)
 				actual_seed[i] ^= seed[i];
-
+            
 			actual_seed[seed_len] = (unsigned char)128;
-
+            
 			for (i = 0; i < 16; i++)
 				actual_seed[i] ^= loop2[i];
 		}
-
+        
 		mtpz_encryption_encrypt_custom(out, actual_seed, expanded);
-
+        
 		free(expanded);
 		free(actual_seed);
 	}
-
+    
 	free(loop1);
 	free(loop2);
 }
@@ -1491,38 +1504,38 @@ ptp_mtpz_validatehandshakeresponse (PTPParams* params, unsigned char *random, un
 	uint16_t ret;
 	unsigned int len;
 	unsigned char* response = NULL;
-
+    
 	ret = ptp_mtpz_getwmdrmpdappresponse (params, &response, &len);
 	if (ret == PTP_RC_OK)
 	{
 		char *reader = (char *)response;
 		int i;
-
+        
 		if (*(reader++) != '\x02')
 		{
 			return -1;
 		}
-
+        
 		if (*(reader++) != '\x02')
 		{
 			return -1;
 		}
-
+        
 		// Message is always 128 bytes.
 		reader++;
 		if (*(reader++) != '\x80')
 		{
 			return -1;
 		}
-
+        
 		char *message = (char *)malloc(128);
 		memcpy(message, reader, 128);
 		reader += 128;
-
+        
 		// Decrypt the hash-key-message..
 		char *msg_dec = (char *)malloc(128);
 		memset(msg_dec, 0, 128);
-
+        
 		mtpz_rsa_t *rsa = mtpz_rsa_init(MTPZ_MODULUS, MTPZ_PRIVATE_KEY, MTPZ_PUBLIC_EXPONENT);
 		if (!rsa)
 		{
@@ -1531,54 +1544,54 @@ ptp_mtpz_validatehandshakeresponse (PTPParams* params, unsigned char *random, un
 			free(msg_dec);
 			return -1;
 		}
-
+        
 		if (mtpz_rsa_decrypt(128, (unsigned char *)message, 128, (unsigned char *)msg_dec, rsa) == 0)
 		{
 			LIBMTP_INFO ("(MTPZ) Failure - could not perform RSA decryption.\n");
-
+            
 			free(message);
 			free(msg_dec);
 			mtpz_rsa_free(rsa);
 			return -1;
 		}
-
+        
 		mtpz_rsa_free(rsa);
 		rsa = NULL;
-
+        
 		char *state = mtpz_hash_init_state();
 		char *hash_key = (char *)malloc(16);
 		char *v10 = mtpz_hash_custom6A5DC(state, msg_dec + 21, 107, 20);
-
+        
 		for (i = 0; i < 20; i++)
 			msg_dec[i + 1] ^= v10[i];
-
+        
 		char *v11 = mtpz_hash_custom6A5DC(state, msg_dec + 1, 20, 107);
-
+        
 		for (i = 0; i < 107; i++)
 			msg_dec[i + 21] ^= v11[i];
-
+        
 		memcpy(hash_key, msg_dec + 112, 16);
-
+        
 		// Encrypted message is 0x340 bytes.
 		reader += 2;
 		if (*(reader++) != '\x03' || *(reader++) != '\x40')
 		{
 			return -1;
 		}
-
+        
 		unsigned char *act_msg = (unsigned char *)malloc(832);
 		unsigned char *act_reader = act_msg;
 		memcpy(act_msg, reader, 832);
 		reader = NULL;
-
+        
 		mtpz_encryption_cipher_advanced((unsigned char *)hash_key, 16, act_msg, 832, 0);
-
+        
 		act_reader++;
-		unsigned int certs_length = __builtin_bswap32(*(unsigned int *)(act_reader));
+		unsigned int certs_length = MTPZ_SWAP(*(unsigned int *)(act_reader));
 		act_reader += 4;
 		act_reader += certs_length;
-
-		unsigned int rand_length = __builtin_bswap32(*(unsigned short *)(act_reader) << 16);
+        
+		unsigned int rand_length = MTPZ_SWAP(*(unsigned short *)(act_reader) << 16);
 		act_reader += 2;
 		unsigned char *rand_data = (unsigned char *)malloc(rand_length);
 		memcpy(rand_data, act_reader, rand_length);
@@ -1589,27 +1602,27 @@ ptp_mtpz_validatehandshakeresponse (PTPParams* params, unsigned char *random, un
 		}
 		free(rand_data);
 		act_reader += rand_length;
-
-		unsigned int dev_rand_length = __builtin_bswap32(*(unsigned short *)(act_reader) << 16);
+        
+		unsigned int dev_rand_length = MTPZ_SWAP(*(unsigned short *)(act_reader) << 16);
 		act_reader += 2;
 		act_reader += dev_rand_length;
-
+        
 		act_reader++;
-
-		unsigned int sig_length = __builtin_bswap32(*(unsigned short *)(act_reader) << 16);
+        
+		unsigned int sig_length = MTPZ_SWAP(*(unsigned short *)(act_reader) << 16);
 		act_reader += 2;
 		act_reader += sig_length;
-
+        
 		act_reader++;
-
-		unsigned int machash_length = __builtin_bswap32(*(unsigned short *)(act_reader) << 16);
+        
+		unsigned int machash_length = MTPZ_SWAP(*(unsigned short *)(act_reader) << 16);
 		act_reader += 2;
 		unsigned char *machash_data = (unsigned char *)malloc(machash_length);
 		memcpy(machash_data, act_reader, machash_length);
 		act_reader += machash_length;
-
+        
 		*calculatedHash = machash_data;
-
+        
 		free(message);
 		free(msg_dec);
 		free(state);
@@ -1621,7 +1634,7 @@ ptp_mtpz_validatehandshakeresponse (PTPParams* params, unsigned char *random, un
 	{
 		LIBMTP_INFO ("(MTPZ) Failure - did not receive device's response.\n");
 	}
-
+    
 	return ret;
 }
 
@@ -1632,12 +1645,12 @@ ptp_mtpz_opensecuresyncsession (PTPParams* params, unsigned char *hash)
 	uint32_t	*hashparams = (unsigned int *)mch;
 	unsigned int	macCount = *(unsigned int *)(hash + 16);
 	uint16_t	ret;
-
+    
 	mtpz_encryption_encrypt_mac(hash, 16, (unsigned char *)(&macCount), 4, mch);
-
+    
 	ret = ptp_mtpz_wmdrmpd_enabletrustedfilesoperations(params,
-		__builtin_bswap32(hashparams[0]), __builtin_bswap32(hashparams[1]),
-		__builtin_bswap32(hashparams[2]), __builtin_bswap32(hashparams[3]));
+                                                        MTPZ_SWAP(hashparams[0]), MTPZ_SWAP(hashparams[1]),
+                                                        MTPZ_SWAP(hashparams[2]), MTPZ_SWAP(hashparams[3]));
 	return ret;
 };
 
@@ -1645,16 +1658,16 @@ static unsigned char *
 ptp_mtpz_makeapplicationcertificatemessage (unsigned int *out_len, unsigned char **out_random)
 {
 	*out_len = 785;
-
+    
 	unsigned char *acm = (unsigned char *)malloc(785);
 	unsigned char *target = acm;
 	memset(acm, 0, 785);
-
+    
 	unsigned char *random = (unsigned char *)malloc(16);
-
+    
 	int i = 0;
 	int certsLength = 0x275;
-
+    
 	// Write the marker bytes, length of certificates, and certificates themselves.
 	*(target++) = '\x02';
 	*(target++) = '\x01';
@@ -1665,53 +1678,53 @@ ptp_mtpz_makeapplicationcertificatemessage (unsigned int *out_len, unsigned char
 	*(target++) = '\x75';
 	memcpy(target, MTPZ_CERTIFICATES, certsLength);
 	target += certsLength;
-
+    
 	// Write the random bytes.
 	*(target++) = '\x00';	*(target++) = '\x10';
 	srand(time(NULL));
-
+    
 	for (i = 0; i < 16; i++)
 		*(random + i) = (unsigned char)(rand() % 256);
-
+    
 	*out_random = random;
 	memcpy(target, random, 16);
 	target += 16;
-
+    
 	char *state = mtpz_hash_init_state();
 	char *v16 = (char *)malloc(28); memset(v16, 0, 28);
 	char *hash = (char *)malloc(20); memset(hash, 0, 20);
 	char *odata = (char *)malloc(128); memset(odata, 0, 128);
-
+    
 	mtpz_hash_reset_state(state);
 	mtpz_hash_transform_hash(state, (char *)acm + 2, (target - acm - 2));
 	mtpz_hash_finalize_hash(state, v16 + 8);
-
+    
 	mtpz_hash_reset_state(state);
 	mtpz_hash_transform_hash(state, v16, 28);
 	mtpz_hash_finalize_hash(state, hash);
-
+    
 	char *v17 = mtpz_hash_custom6A5DC(state, hash, 20, 107);
-
+    
 	for (i = 0; i < 20; i++)
 		odata[107 + i] = hash[i];
-
+    
 	odata[106] = '\x01';
-
+    
 	if (v17 != NULL)
 	{
 		for (i = 0; i < 107; i++)
 			odata[i] ^= v17[i];
-
+        
 		odata[0] &= 127;
 		odata[127] = 188;
 	}
-
+    
 	// Free up some jazz.
 	free(state); state = NULL;
 	free(v16); v16 = NULL;
 	free(v17); v17 = NULL;
 	free(hash); hash = NULL;
-
+    
 	// Take care of some RSA jazz.
 	mtpz_rsa_t *rsa = mtpz_rsa_init(MTPZ_MODULUS, MTPZ_PRIVATE_KEY, MTPZ_PUBLIC_EXPONENT);
 	if (!rsa)
@@ -1720,22 +1733,22 @@ ptp_mtpz_makeapplicationcertificatemessage (unsigned int *out_len, unsigned char
 		*out_len = 0;
 		return NULL;
 	}
-
+    
 	char *signature = (char *)malloc(128);
 	memset(signature, 0, 128);
 	mtpz_rsa_sign(128, (unsigned char *)odata, 128, (unsigned char *)signature, rsa);
-
+    
 	// Free some more things.
 	mtpz_rsa_free(rsa); rsa = NULL;
 	free(odata); odata = NULL;
-
+    
 	// Write the signature + bytes.
 	*(target++) = '\x01'; *(target++) = '\x00'; *(target++) = '\x80';
 	memcpy(target, signature, 128);
-
+    
 	// Kill target.
 	target = NULL;
-
+    
 	return acm;
 };
 
@@ -1748,15 +1761,15 @@ ptp_mtpz_makeconfirmationmessage (unsigned char *hash, unsigned int *out_len)
 	message[1] = (unsigned char)0x03;
 	message[2] = (unsigned char)0x00;
 	message[3] = (unsigned char)0x10;
-
+    
 	unsigned char *seed = (unsigned char *)malloc(16);
 	memset(seed, 0, 16);
 	seed[15] = (unsigned char)(0x01);
-
+    
 	mtpz_encryption_encrypt_mac(hash, 16u, seed, 16u, message + 4);
-
+    
 	free(seed);
-
+    
 	return message;
 }
 
@@ -1769,41 +1782,41 @@ uint16_t ptp_mtpz_handshake (PTPParams* params)
 	PTPPropertyValue propval;
 	unsigned char*	applicationCertificateMessage;
 	unsigned char*	message;
-
+    
 	/* FIXME: do other places of libmtp set it? should we set it? */
 	LIBMTP_INFO ("(MTPZ) Setting session initiator info.\n");
 	propval.str = "libmtp/Sajid Anwar - MTPZClassDriver";
 	ret = ptp_setdevicepropvalue(params,
-		   PTP_DPC_MTP_SessionInitiatorInfo,
-		   &propval,
-		   PTP_DTC_STR);
+                                 PTP_DPC_MTP_SessionInitiatorInfo,
+                                 &propval,
+                                 PTP_DTC_STR);
 	if (ret != PTP_RC_OK)
 		return ret;
-
+    
 	LIBMTP_INFO ("(MTPZ) Resetting handshake.\n");
 	ret = ptp_mtpz_resethandshake(params);
 	if (ret != PTP_RC_OK)
 		return ret;
-
+    
 	LIBMTP_INFO ("(MTPZ) Sending application certificate message.\n");
 	applicationCertificateMessage = ptp_mtpz_makeapplicationcertificatemessage(&size, &random);
 	ret = ptp_mtpz_sendwmdrmpdapprequest (params, applicationCertificateMessage, size);
 	free (applicationCertificateMessage);
 	if (ret != PTP_RC_OK)
 		return ret;
-
+    
 	LIBMTP_INFO ("(MTPZ) Getting and validating handshake response.\n");
 	ret = ptp_mtpz_validatehandshakeresponse(params, random, &hash);
 	if (ret != PTP_RC_OK)
 		goto free_random;
-
+    
 	LIBMTP_INFO ("(MTPZ) Sending confirmation message.\n");
 	message = ptp_mtpz_makeconfirmationmessage(hash, &size);
-        ret = ptp_mtpz_sendwmdrmpdapprequest (params, message, size);
+    ret = ptp_mtpz_sendwmdrmpdapprequest (params, message, size);
 	if (ret != PTP_RC_OK)
 		goto free_hash;
 	free (message);
-
+    
 	LIBMTP_INFO ("(MTPZ) Opening secure sync session.\n");
 	ret = ptp_mtpz_opensecuresyncsession(params, hash);
 free_hash:

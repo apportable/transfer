@@ -33,6 +33,7 @@
 #include "ptp.h"
 #ifdef HAVE_LIBUSB1
 #include <libusb.h>
+#include <pthread.h>
 #endif
 #ifdef HAVE_LIBUSB0
 #include <usb.h>
@@ -47,22 +48,22 @@
 #ifdef __cplusplus
 extern "C" {
 #endif /* __cplusplus */
-
-/**
- * Debug macro
- */
+    
+    /**
+     * Debug macro
+     */
 #define LIBMTP_USB_DEBUG(format, args...) \
-  do { \
-    if ((LIBMTP_debug & LIBMTP_DEBUG_USB) != 0) \
-      fprintf(stdout, "LIBMTP %s[%d]: " format, __FUNCTION__, __LINE__, ##args); \
-  } while (0)
-
+do { \
+if ((LIBMTP_debug & LIBMTP_DEBUG_USB) != 0) \
+fprintf(stdout, "LIBMTP %s[%d]: " format, __FUNCTION__, __LINE__, ##args); \
+} while (0)
+    
 #define LIBMTP_USB_DATA(buffer, length, base) \
-  do { \
-    if ((LIBMTP_debug & LIBMTP_DEBUG_DATA) != 0) \
-      data_dump_ascii (stdout, buffer, length, base); \
-  } while (0)
-
+do { \
+if ((LIBMTP_debug & LIBMTP_DEBUG_DATA) != 0) \
+data_dump_ascii (stdout, buffer, length, base); \
+} while (0)
+    
 #ifdef HAVE_LIBUSB1
 #define USB_BULK_READ libusb_bulk_transfer
 #define USB_BULK_WRITE libusb_bulk_transfer
@@ -75,107 +76,138 @@ extern "C" {
 #define USB_BULK_READ openusb_bulk_xfer
 #define USB_BULK_WRITE openusb_bulk_xfer
 #endif
-
-/**
- * Internal USB struct.
- */
-typedef struct _PTP_USB PTP_USB;
-struct _PTP_USB {
-  PTPParams *params;
+    
 #ifdef HAVE_LIBUSB1
-  libusb_device_handle* handle;
+    /*
+     * With libusb1 we use a threaded read/write handler
+     * to speed up transfers.
+     */
+    struct ptp_write_td {
+        struct libusb_transfer *transfer;
+        struct ptp_write_td *next;
+        unsigned char *buffer;
+    };
+    /* Number of async transfer buffers */
+#define WRITE_TRANSFER_NUM 4
+#endif
+    
+    /**
+     * Internal USB struct.
+     */
+    typedef struct _PTP_USB PTP_USB;
+    struct _PTP_USB {
+        PTPParams *params;
+#ifdef HAVE_LIBUSB1
+        /*
+         * With libusb1 we use a threaded read/write handler
+         * to speed up transfers.
+         */
+        libusb_device_handle* handle;
+        int event_thread_run;
+        pthread_t ptp_event_thread_tid;
+        int ptp_read_transfer_done_flag;
+        pthread_cond_t ptp_read_transfer_done_cv;
+        pthread_mutex_t ptp_read_transfer_done_mutex;
+        
+        int ptp_write_transfer_done_flag;
+        pthread_cond_t ptp_write_transfer_cv;
+        pthread_mutex_t ptp_write_transfer_mutex;
+        
+        unsigned char *bytes[WRITE_TRANSFER_NUM];
+        struct ptp_write_td write_td_array[WRITE_TRANSFER_NUM];
+        struct ptp_write_td *p_write_head_td, *p_write_tail_td;
 #endif
 #ifdef HAVE_LIBUSB0
-  usb_dev_handle* handle;
+        usb_dev_handle* handle;
 #endif
 #ifdef HAVE_LIBOPENUSB
-  openusb_dev_handle_t* handle;
+        openusb_dev_handle_t* handle;
 #endif
-  uint8_t config;
-  uint8_t interface;
-  uint8_t altsetting;
-  int inep;
-  int inep_maxpacket;
-  int outep;
-  int outep_maxpacket;
-  int intep;
-  /** File transfer callbacks and counters */
-  int callback_active;
-  int timeout;
-  uint16_t bcdusb;
-  uint64_t current_transfer_total;
-  uint64_t current_transfer_complete;
-  LIBMTP_progressfunc_t current_transfer_callback;
-  void const * current_transfer_callback_data;
-  /** Any special device flags, only used internally */
-  LIBMTP_raw_device_t rawdevice;
-};
-
-void dump_usbinfo(PTP_USB *ptp_usb);
-const char *get_playlist_extension(PTP_USB *ptp_usb);
-void close_device(PTP_USB *ptp_usb, PTPParams *params);
-LIBMTP_error_number_t configure_usb_device(LIBMTP_raw_device_t *device,
-					   PTPParams *params,
-					   void **usbinfo);
-void set_usb_device_timeout(PTP_USB *ptp_usb, int timeout);
-void get_usb_device_timeout(PTP_USB *ptp_usb, int *timeout);
-int guess_usb_speed(PTP_USB *ptp_usb);
-
-/* Flag check macros */
+        uint8_t config;
+        uint8_t interface;
+        uint8_t altsetting;
+        int inep;
+        int inep_maxpacket;
+        int outep;
+        int outep_maxpacket;
+        int intep;
+        /** File transfer callbacks and counters */
+        int callback_active;
+        int timeout;
+        uint16_t bcdusb;
+        uint64_t current_transfer_total;
+        uint64_t current_transfer_complete;
+        LIBMTP_progressfunc_t current_transfer_callback;
+        void const * current_transfer_callback_data;
+        /** Any special device flags, only used internally */
+        LIBMTP_raw_device_t rawdevice;
+    };
+    
+    void dump_usbinfo(PTP_USB *ptp_usb);
+    const char *get_playlist_extension(PTP_USB *ptp_usb);
+    void close_device(PTP_USB *ptp_usb, PTPParams *params);
+    LIBMTP_error_number_t configure_usb_device(LIBMTP_raw_device_t *device,
+                                               PTPParams *params,
+                                               void **usbinfo);
+    void set_usb_device_timeout(PTP_USB *ptp_usb, int timeout);
+    void get_usb_device_timeout(PTP_USB *ptp_usb, int *timeout);
+    int guess_usb_speed(PTP_USB *ptp_usb);
+    
+    /* Flag check macros */
 #define FLAG_BROKEN_MTPGETOBJPROPLIST_ALL(a) \
-  ((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_BROKEN_MTPGETOBJPROPLIST_ALL)
+((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_BROKEN_MTPGETOBJPROPLIST_ALL)
 #define FLAG_UNLOAD_DRIVER(a) \
-  ((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_UNLOAD_DRIVER)
+((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_UNLOAD_DRIVER)
 #define FLAG_BROKEN_MTPGETOBJPROPLIST(a) \
-  ((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_BROKEN_MTPGETOBJPROPLIST)
+((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_BROKEN_MTPGETOBJPROPLIST)
 #define FLAG_NO_ZERO_READS(a) \
-  ((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_NO_ZERO_READS)
+((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_NO_ZERO_READS)
 #define FLAG_IRIVER_OGG_ALZHEIMER(a) \
-  ((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_IRIVER_OGG_ALZHEIMER)
+((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_IRIVER_OGG_ALZHEIMER)
 #define FLAG_ONLY_7BIT_FILENAMES(a) \
-  ((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_ONLY_7BIT_FILENAMES)
+((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_ONLY_7BIT_FILENAMES)
 #define FLAG_NO_RELEASE_INTERFACE(a) \
-  ((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_NO_RELEASE_INTERFACE)
+((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_NO_RELEASE_INTERFACE)
 #define FLAG_IGNORE_HEADER_ERRORS(a) \
-  ((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_IGNORE_HEADER_ERRORS)
+((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_IGNORE_HEADER_ERRORS)
 #define FLAG_BROKEN_SET_OBJECT_PROPLIST(a) \
-  ((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_BROKEN_SET_OBJECT_PROPLIST)
+((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_BROKEN_SET_OBJECT_PROPLIST)
 #define FLAG_OGG_IS_UNKNOWN(a) \
-  ((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_OGG_IS_UNKNOWN)
+((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_OGG_IS_UNKNOWN)
 #define FLAG_BROKEN_SET_SAMPLE_DIMENSIONS(a) \
-  ((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_BROKEN_SET_SAMPLE_DIMENSIONS)
+((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_BROKEN_SET_SAMPLE_DIMENSIONS)
 #define FLAG_ALWAYS_PROBE_DESCRIPTOR(a) \
-  ((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_ALWAYS_PROBE_DESCRIPTOR)
+((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_ALWAYS_PROBE_DESCRIPTOR)
 #define FLAG_PLAYLIST_SPL_V1(a) \
-  ((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_PLAYLIST_SPL_V1)
+((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_PLAYLIST_SPL_V1)
 #define FLAG_PLAYLIST_SPL_V2(a) \
-  ((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_PLAYLIST_SPL_V2)
+((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_PLAYLIST_SPL_V2)
 #define FLAG_PLAYLIST_SPL(a) \
-  ((a)->rawdevice.device_entry.device_flags & (DEVICE_FLAG_PLAYLIST_SPL_V1 | DEVICE_FLAG_PLAYLIST_SPL_V2))
+((a)->rawdevice.device_entry.device_flags & (DEVICE_FLAG_PLAYLIST_SPL_V1 | DEVICE_FLAG_PLAYLIST_SPL_V2))
 #define FLAG_CANNOT_HANDLE_DATEMODIFIED(a) \
-  ((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_CANNOT_HANDLE_DATEMODIFIED)
+((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_CANNOT_HANDLE_DATEMODIFIED)
 #define FLAG_BROKEN_SEND_OBJECT_PROPLIST(a) \
-  ((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_BROKEN_SEND_OBJECT_PROPLIST)
+((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_BROKEN_SEND_OBJECT_PROPLIST)
 #define FLAG_BROKEN_BATTERY_LEVEL(a) \
-  ((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_BROKEN_BATTERY_LEVEL)
+((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_BROKEN_BATTERY_LEVEL)
 #define FLAG_FLAC_IS_UNKNOWN(a) \
-  ((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_FLAC_IS_UNKNOWN)
+((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_FLAC_IS_UNKNOWN)
 #define FLAG_UNIQUE_FILENAMES(a) \
-  ((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_UNIQUE_FILENAMES)
+((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_UNIQUE_FILENAMES)
 #define FLAG_SWITCH_MODE_BLACKBERRY(a) \
-  ((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_SWITCH_MODE_BLACKBERRY)
+((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_SWITCH_MODE_BLACKBERRY)
 #define FLAG_LONG_TIMEOUT(a) \
-  ((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_LONG_TIMEOUT)
+((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_LONG_TIMEOUT)
 #define FLAG_FORCE_RESET_ON_CLOSE(a) \
-  ((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_FORCE_RESET_ON_CLOSE)
+((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_FORCE_RESET_ON_CLOSE)
 #define FLAG_BROKEN_GET_OBJECT_PROPVAL(a) \
-  ((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_BROKEN_GET_OBJECT_PROPVAL)
-
-/* connect_first_device return codes */
+((a)->rawdevice.device_entry.device_flags & DEVICE_FLAG_BROKEN_GET_OBJECT_PROPVAL)
+    
+    /* connect_first_device return codes */
 #define PTP_CD_RC_CONNECTED	0
 #define PTP_CD_RC_NO_DEVICES	1
 #define PTP_CD_RC_ERROR_CONNECTING	2
-
+    
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */
