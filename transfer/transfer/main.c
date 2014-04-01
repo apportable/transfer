@@ -19,6 +19,7 @@
 #include <libgen.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <stdarg.h>
 
 #define SIZE_BUFSZ 7
 static char const SIZE_PREFIXES[] = "kMGTPEZY";
@@ -190,6 +191,26 @@ static void usage()
     printf("transfer <file>\n");
 }
 
+static int run_command(const char *fmt, ...)
+{
+    char *buffer = NULL;
+    va_list args;
+    va_start(args, fmt);
+    int r = vasprintf(&buffer, fmt, args);
+    va_end(args);
+    
+    if (r == -1)
+    {
+        return -1;
+    }
+    
+    r = system(buffer);
+    
+    free(buffer);
+    
+    return r;
+}
+
 int main(int argc, const char * argv[])
 {
     int err = 0;
@@ -246,24 +267,48 @@ int main(int argc, const char * argv[])
         {
             printf("Transfer complete.                                                          \n"); // clear out the progress too
             char *sdk_root = getenv("ANDROID_SDK");
-            char *install_cmd = (char *)calloc(1, 1024);
-            char *rm_cmd = (char *)calloc(1, 1024);
+            
             if (sdk_root == NULL)
             {
-                sprintf(install_cmd, "adb shell pm install -r /sdcard/%s", filename);
-                sprintf(rm_cmd, "adb shell rm /sdcard/%s", filename);
+                do {
+                    err = run_command("adb shell pm install -r /sdcard/%s", filename);
+                    if (err != 0)
+                    {
+                        break;
+                    }
+                    
+                    err = run_command("adb shell rm /sdcard/%s", filename);
+                    if (err != 0)
+                    {
+                        break;
+                    }
+                } while (0);
             }
             else
             {
-                sprintf(install_cmd, "%s/platform-tools/adb shell pm install -r /sdcard/%s", sdk_root, filename);
-                sprintf(rm_cmd, "%s/platform-tools/adb shell rm /sdcard/%s", sdk_root, filename);
+                do {
+                    err = run_command("%s/platform-tools/adb shell pm install -r /sdcard/%s", sdk_root, filename);
+                    if (err != 0)
+                    {
+                        break;
+                    }
+                    
+                    err = run_command("%s/platform-tools/adb shell rm /sdcard/%s", sdk_root, filename);
+                    if (err != 0)
+                    {
+                        break;
+                    }
+                } while (0);
             }
-            system(install_cmd);
-            system(rm_cmd);
-            free(install_cmd);
-            free(rm_cmd);
-            printf("Install complete.\n");
-            err = 0;
+            
+            if (err == 0)
+            {
+                printf("Install complete.\n");
+            }
+            else
+            {
+                printf("Install failed.\n");
+            }
         }
         else
         {
@@ -276,18 +321,15 @@ int main(int argc, const char * argv[])
     {
         printf("No mtp compatible devices found: Falling back to slow path\n");
         char *sdk_root = getenv("ANDROID_SDK");
-        char *cmd = (char *)calloc(1, 1024);
+
         if (sdk_root == NULL)
         {
-            sprintf(cmd, "adb install -r %s", from_path);
+            err = run_command("adb install -r %s", from_path);
         }
         else
         {
-            sprintf(cmd, "%s/platform-tools/adb install -r %s", sdk_root, from_path);
+            err = run_command("%s/platform-tools/adb install -r %s", sdk_root, from_path);
         }
-        system(cmd);
-        free(cmd);
-        err = 0;
     }
 
     return err;
