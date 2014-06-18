@@ -253,7 +253,7 @@ int main(int argc, const char * argv[])
         files = LIBMTP_Get_Filelisting_With_Callback (device, NULL, NULL);
         for (LIBMTP_file_t *file = files; file != NULL; file = file->next)
         {
-            if (strcmp(file->filename, filename) == 0)
+            if (!file->filename || strcmp(file->filename, filename) == 0)
             {
                 printf("Removing previous transfer cache from device.\n");
                 LIBMTP_Delete_Object(device, file->item_id);
