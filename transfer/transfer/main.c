@@ -245,6 +245,8 @@ int main(int argc, const char * argv[])
         adb_command = "adb";
     }
     
+    int transfer_succeeded = 0;
+    
     if (device != NULL)
     {
         char *filename = basename((char *)from_path);
@@ -281,35 +283,39 @@ int main(int argc, const char * argv[])
         f->storage_id = folders->storage_id;
         
         int fd = open(argv[1], O_RDONLY);
-        if(LIBMTP_Send_File_From_File_Descriptor(device, fd, f, &progressfunc, NULL) == 0)
+        int send_succeeded = LIBMTP_Send_File_From_File_Descriptor(device, fd, f, &progressfunc, NULL) == 0;
+        LIBMTP_Release_Device(device);
+        if (send_succeeded)
         {
             printf("Transfer complete.                                                          \n"); // clear out the progress too
+            //sleep(1);  // install can fail to find device if it comes too soon after the transfer
             
             err = run_command("\"%s\" shell pm install -r /sdcard/%s", adb_command, filename);
             if (err == 0)
             {
-                err = run_command("\"%s\" shell rm /sdcard/%s", adb_command, filename);
-            }
-            
-            if (err == 0)
-            {
                 printf("Install complete!\n");
+                transfer_succeeded = 1;
             }
             else
             {
                 printf("Install failed.\n");
             }
+            if (run_command("\"%s\" shell rm /sdcard/%s", adb_command, filename) != 0)
+            {
+                printf("Failed to remove intermediate transfer file. Try 'adb shell rm /sdcard/%s'\n", filename);
+            }
         }
-        else
+        if (!transfer_succeeded)
         {
-            printf("Transfer failed.\n");
-            err = -2;
+            printf("Transfer installation failed. Trying to use adb instead. Use MTP=no to skip trying transfer\n");
         }
-        LIBMTP_Release_Device(device);
     }
-    else
+    if (device == NULL)
     {
         printf("No mtp compatible devices found: Falling back to slow path\n");
+    }
+    if (!transfer_succeeded)
+    {
         err = run_command("\"%s\" install -r %s", adb_command, from_path);
     }
 
