@@ -234,10 +234,13 @@ int main(int argc, const char * argv[])
         char *sdk_root = getenv("ANDROID_SDK");
         if (sdk_root != NULL)
         {
-            char const *rest_of_sdk_path = "/platforms-tools/adb";
-            char buffer[strlen(sdk_root) + strlen(rest_of_sdk_path) + 1];
-            sprintf(buffer, "%s%s", sdk_root, rest_of_sdk_path);
-            adb_command = buffer;
+            asprintf(&adb_command, "%s/platform-tools/adb", sdk_root);
+            if (access(adb_command, F_OK) == -1)
+            {
+                // File doesn't exist
+                free(adb_command);
+                adb_command = NULL;
+            }
         }
     }
     if (adb_command == NULL)
