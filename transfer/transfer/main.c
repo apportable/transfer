@@ -293,7 +293,7 @@ int main(int argc, const char * argv[])
             printf("Transfer complete.                                                          \n"); // clear out the progress too
             //sleep(1);  // install can fail to find device if it comes too soon after the transfer
             
-            err = run_command("\"%s\" shell pm install -r /sdcard/%s", adb_command, filename);
+            err = run_command("\"%s\" shell pm install -r \"/sdcard/%s\"", adb_command, filename);
             if (err == 0)
             {
                 printf("Install complete!\n");
@@ -303,7 +303,7 @@ int main(int argc, const char * argv[])
             {
                 printf("Install failed.\n");
             }
-            if (run_command("\"%s\" shell rm /sdcard/%s", adb_command, filename) != 0)
+            if (run_command("\"%s\" shell rm \"/sdcard/%s\"", adb_command, filename) != 0)
             {
                 printf("Failed to remove intermediate transfer file. Try 'adb shell rm /sdcard/%s'\n", filename);
             }
@@ -319,7 +319,7 @@ int main(int argc, const char * argv[])
     }
     if (!transfer_succeeded)
     {
-        err = run_command("\"%s\" install -r %s", adb_command, from_path);
+        err = run_command("\"%s\" install -r \"%s\"", adb_command, from_path);
     }
 
     return err;
